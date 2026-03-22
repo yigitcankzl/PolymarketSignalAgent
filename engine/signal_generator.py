@@ -36,7 +36,36 @@ def generate_signal(edge: float, confidence: float) -> str:
     return "HOLD"
 
 
-def create_signal_entry(analysis: dict, news_count: int = 0) -> dict:
+def calculate_kelly(edge: float, confidence: float, market_odds: float, fraction: float = 0.25, max_kelly: float = 0.05) -> float:
+    """Calculate fractional Kelly criterion position size.
+
+    Kelly = (p * b - q) / b, where:
+    - p = estimated probability of winning
+    - q = 1 - p
+    - b = odds (payout ratio)
+    fraction = Kelly fraction (0.25 = quarter Kelly for safety)
+    max_kelly = maximum position size cap (5% of bankroll)
+    """
+    if abs(edge) < 0.01 or confidence < 0.3:
+        return 0.0
+
+    if edge > 0:
+        p = min(0.95, market_odds + edge)
+        b = (1 / market_odds) - 1 if market_odds > 0 else 0
+    else:
+        p = min(0.95, (1 - market_odds) + abs(edge))
+        b = (1 / (1 - market_odds)) - 1 if market_odds < 1 else 0
+
+    if b <= 0:
+        return 0.0
+
+    q = 1 - p
+    kelly = (p * b - q) / b
+    kelly = max(0, kelly * fraction * confidence)
+    return round(min(kelly, max_kelly), 4)
+
+
+def create_signal_entry(analysis: dict, news_count: int = 0, slug: str = "") -> dict:
     """Create a full signal entry from analysis results."""
     market_odds = analysis["market_odds"]
     llm_probability = analysis["probability"]
@@ -44,8 +73,12 @@ def create_signal_entry(analysis: dict, news_count: int = 0) -> dict:
     edge = calculate_edge(llm_probability, market_odds)
     signal = generate_signal(edge, confidence)
     score = abs(edge) * confidence
+    kelly_size = calculate_kelly(edge, confidence, market_odds)
 
-    return {
+    # Build Polymarket URL
+    polymarket_url = f"https://polymarket.com/event/{slug}" if slug else ""
+
+    entry = {
         "market_id": analysis["market_id"],
         "question": analysis["question"],
         "market_odds": round(market_odds, 4),
@@ -54,11 +87,21 @@ def create_signal_entry(analysis: dict, news_count: int = 0) -> dict:
         "confidence": round(confidence, 4),
         "signal": signal,
         "score": round(score, 4),
+        "kelly_fraction": kelly_size,
+        "polymarket_url": polymarket_url,
         "reasoning": analysis["reasoning"],
         "key_factors": analysis["key_factors"],
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "news_count": news_count,
     }
+
+    # Add ensemble data if available
+    if "ensemble" in analysis:
+        entry["ensemble"] = analysis["ensemble"]
+    if "raw_probability" in analysis:
+        entry["raw_probability"] = round(analysis["raw_probability"], 4)
+
+    return entry
 
 
 def rank_signals(signals: list[dict]) -> list[dict]:
@@ -71,21 +114,28 @@ def filter_actionable(signals: list[dict]) -> list[dict]:
     return [s for s in signals if s["signal"] != "HOLD"]
 
 
-def generate_all_signals(analyses: list[dict], news_counts: dict[str, int]) -> list[dict]:
+def generate_all_signals(
+    analyses: list[dict],
+    news_counts: dict[str, int],
+    slugs: dict[str, str] | None = None,
+) -> list[dict]:
     """Generate signals for all analyzed markets.
 
     Args:
         analyses: List of analysis results from LLMAnalyzer.batch_analyze
         news_counts: Dict mapping market_id -> number of news articles
+        slugs: Dict mapping market_id -> polymarket slug
 
     Returns:
         Ranked list of signal entries
     """
+    slugs = slugs or {}
     signals = []
     for analysis in analyses:
         market_id = analysis["market_id"]
         count = news_counts.get(market_id, 0)
-        signal = create_signal_entry(analysis, news_count=count)
+        slug = slugs.get(market_id, "")
+        signal = create_signal_entry(analysis, news_count=count, slug=slug)
         signals.append(signal)
 
     signals = rank_signals(signals)
@@ -148,7 +198,13 @@ def print_signal_summary(signals: list[dict]) -> None:
 
         print(f"\n{color}[{s['signal']}]{reset} {s['question'][:70]}")
         print(f"  Market: {s['market_odds']:.1%} | LLM: {s['llm_probability']:.1%} | Edge: {s['edge']:+.1%} | Confidence: {s['confidence']:.0%}")
-        print(f"  Score: {s['score']:.4f} | News: {s['news_count']} articles")
+        kelly = s.get('kelly_fraction', 0)
+        ensemble_info = ""
+        if s.get('ensemble'):
+            models = s['ensemble'].get('models_used', 0)
+            spread = s['ensemble'].get('spread', 0)
+            ensemble_info = f" | Ensemble: {models} models, spread={spread:.2f}"
+        print(f"  Score: {s['score']:.4f} | Kelly: {kelly:.1%} | News: {s['news_count']}{ensemble_info}")
         print(f"  Reasoning: {s['reasoning'][:120]}")
 
     hold_count = len([s for s in signals if s["signal"] == "HOLD"])

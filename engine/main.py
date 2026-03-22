@@ -90,7 +90,8 @@ def run_pipeline(
     # Step 4: Generate signals
     print("[4/5] Generating signals...")
     news_counts = {mid: len(articles) for mid, articles in news_map.items()}
-    signals = generate_all_signals(analyses, news_counts)
+    slugs = {m["id"]: m.get("slug", "") for m in markets}
+    signals = generate_all_signals(analyses, news_counts, slugs=slugs)
     print(f"  Generated {len(signals)} signals\n")
 
     # Step 5: Export
