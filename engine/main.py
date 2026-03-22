@@ -27,52 +27,48 @@ logger = logging.getLogger(__name__)
 def _fetch_markets_synthesis(max_markets: int) -> tuple[list[dict], list[dict]]:
     """Fetch markets via Synthesis API (unified Polymarket + Kalshi)."""
     with SynthesisClient() as client:
-        # Get Polymarket markets
-        pm_markets = client.get_polymarket_markets(limit=max_markets)
+        # Get Polymarket markets (returns list of {event, markets[]})
+        pm_events = client.get_polymarket_markets(limit=max_markets)
 
-        # Normalize to our internal format
+        # Flatten: each event contains multiple sub-markets
         markets = []
-        for m in pm_markets:
-            # Extract ID - try multiple field names
-            market_id = (
-                m.get("id") or m.get("condition_id") or
-                m.get("market_id") or m.get("slug") or ""
-            )
-            if not market_id:
-                continue
+        for entry in pm_events:
+            event = entry.get("event", {})
+            sub_markets = entry.get("markets", [])
+            event_slug = event.get("slug", "")
 
-            # Extract yes price from various response formats
-            yes_price = 0.5
-            if "yes_price" in m:
-                yes_price = float(m["yes_price"])
-            elif "outcomePrices" in m:
-                op = m["outcomePrices"]
-                if isinstance(op, str):
-                    import json as _json
-                    op = _json.loads(op)
-                if isinstance(op, list) and op:
-                    yes_price = float(op[0])
-            elif "price" in m:
-                yes_price = float(m["price"])
+            for m in sub_markets:
+                market_id = m.get("condition_id", m.get("slug", ""))
+                if not market_id or not m.get("active", True):
+                    continue
 
-            markets.append({
-                "id": market_id,
-                "question": m.get("question", m.get("title", "")),
-                "description": m.get("description", ""),
-                "slug": m.get("slug", ""),
-                "yes_odds": yes_price,
-                "no_odds": round(1 - yes_price, 4),
-                "outcomes": m.get("outcomes", ["Yes", "No"]),
-                "volume": float(m.get("volume", 0) or 0),
-                "liquidity": float(m.get("liquidity", 0) or 0),
-                "end_date": m.get("end_date", m.get("endDate", "")),
-                "active": True,
-                "closed": False,
-                "resolved": m.get("resolved", False),
-                "resolution": m.get("resolution", None),
-                "venue": "polymarket",
-                "synthesis_url": f"https://synthesis.trade/market/{m.get('slug', '')}",
-            })
+                yes_price = float(m.get("left_price", 0.5))
+                no_price = float(m.get("right_price", 1 - yes_price))
+
+                markets.append({
+                    "id": market_id,
+                    "question": m.get("question", ""),
+                    "description": m.get("description", event.get("description", "")),
+                    "slug": m.get("slug", ""),
+                    "event_slug": event_slug,
+                    "outcome": m.get("outcome", ""),
+                    "yes_odds": yes_price,
+                    "no_odds": no_price,
+                    "outcomes": [m.get("left_outcome", "Yes"), m.get("right_outcome", "No")],
+                    "volume": float(m.get("volume", 0) or 0),
+                    "liquidity": float(m.get("liquidity", 0) or 0),
+                    "end_date": event.get("ends_at", ""),
+                    "active": m.get("active", True),
+                    "closed": False,
+                    "resolved": m.get("resolved", False),
+                    "resolution": None,
+                    "venue": "polymarket",
+                    "synthesis_url": f"https://synthesis.trade/market/{event_slug}",
+                })
+
+        # Keep top markets by volume
+        markets.sort(key=lambda x: x["volume"], reverse=True)
+        markets = markets[:max_markets]
 
         # Also fetch Kalshi for cross-platform arb
         kalshi_markets = client.get_kalshi_markets(limit=max_markets)
