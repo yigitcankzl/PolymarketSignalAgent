@@ -134,8 +134,8 @@ def detect_cross_platform_arb(
             if similarity < similarity_threshold:
                 continue
 
-            pm_price = pm.get("yes_odds", 0.5)
-            km_price = km.get("yes_price", 0.5)
+            pm_price = pm.get("yes_odds", pm.get("yes_price", 0.5))
+            km_price = km.get("yes_odds", km.get("yes_price", 0.5))
             price_diff = abs(pm_price - km_price)
 
             if price_diff < price_threshold:

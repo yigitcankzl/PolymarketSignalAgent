@@ -84,8 +84,28 @@ def _fetch_markets_synthesis(max_markets: int) -> tuple[list[dict], list[dict]]:
         markets.sort(key=lambda x: x["volume"], reverse=True)
         markets = markets[:max_markets]
 
-        # Also fetch Kalshi for cross-platform arb
-        kalshi_markets = client.get_kalshi_markets(limit=max_markets)
+        # Fetch and flatten Kalshi markets for cross-platform arb
+        raw_kalshi = client.get_kalshi_markets(limit=50)
+        kalshi_markets = []
+        for entry in raw_kalshi:
+            event = entry.get("event", {})
+            for m in entry.get("markets", []):
+                if not m.get("active", True):
+                    continue
+                yes_price = float(m.get("left_price", 0.5))
+                if not (0.10 <= yes_price <= 0.90):
+                    continue
+                kalshi_markets.append({
+                    "id": m.get("market_id", m.get("kalshi_id", "")),
+                    "question": m.get("title", ""),
+                    "outcome": m.get("outcome", ""),
+                    "yes_odds": yes_price,
+                    "yes_price": yes_price,
+                    "no_odds": float(m.get("right_price", 1 - yes_price)),
+                    "volume": float(m.get("volume", 0) or 0),
+                    "event_ticker": m.get("event_id", ""),
+                    "venue": "kalshi",
+                })
 
         client.save_snapshot(markets)
 
