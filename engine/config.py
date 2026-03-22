@@ -16,6 +16,7 @@ BACKTEST_DIR = DATA_DIR / "backtest"
 
 # Synthesis API (unified Polymarket + Kalshi)
 SYNTHESIS_API_KEY = os.getenv("SYNTHESIS_API_KEY", "")
+SYNTHESIS_SECRET_KEY = os.getenv("SYNTHESIS_SECRET_KEY", "")
 SYNTHESIS_BASE_URL = "https://synthesis.trade"
 
 # Polymarket API (fallback if Synthesis unavailable)

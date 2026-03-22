@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from engine.synthesis_client import SynthesisClient
-from engine.config import SYNTHESIS_API_KEY, DATA_DIR
+from engine.config import SYNTHESIS_API_KEY, SYNTHESIS_SECRET_KEY, DATA_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +16,7 @@ TRADER_DIR = DATA_DIR / "trader"
 class Trader:
     """Manages accounts, wallets, and order execution via Synthesis API."""
 
-    def __init__(self, project_api_key: str = SYNTHESIS_API_KEY):
+    def __init__(self, project_api_key: str = SYNTHESIS_SECRET_KEY or SYNTHESIS_API_KEY):
         self.client = SynthesisClient(api_key=project_api_key)
         self.account_id: Optional[str] = None
         self.account_api_key: Optional[str] = None
