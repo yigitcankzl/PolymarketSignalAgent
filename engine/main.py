@@ -223,25 +223,26 @@ def run_pipeline(
     if trade_flag and use_synthesis:
         print("\n--- Trading Execution ---")
         from engine.trader import Trader
-        with Trader() as trader:
-            # Setup account/wallet if needed
-            trader.full_setup()
+        try:
+            with Trader() as trader:
+                trader.full_setup()
 
-            # Check balance
-            balance = trader.get_balance()
-            print(f"  Wallet balance: {balance}")
+                balance = trader.get_balance()
+                print(f"  Wallet balance: {balance}")
 
-            # Execute top signals
-            print(f"  Executing top {min(3, len(signals))} signals...")
-            trade_results = trader.execute_signals(signals, max_orders=3, max_amount_per_order=2.0)
-            for tr in trade_results:
-                status = "OK" if "error" not in tr["result"] else tr["result"].get("error", "")[:50]
-                print(f"    {tr['side']} ${tr['amount']} {tr['question'][:40]}... → {status}")
+                print(f"  Executing top {min(3, len(signals))} signals...")
+                trade_results = trader.execute_signals(signals, max_orders=3, max_amount_per_order=2.0)
+                for tr in trade_results:
+                    status = "OK" if "error" not in tr["result"] else tr["result"].get("error", "")[:50]
+                    print(f"    {tr['side']} ${tr['amount']} {tr['question'][:40]}... → {status}")
 
-            # Export trading data for dashboard
-            trader.export_dashboard_data()
-            print(f"  Positions: {len(trader.get_positions())}")
-            print(f"  Trading data exported")
+                trader.export_dashboard_data()
+                print(f"  Positions: {len(trader.get_positions())}")
+                print(f"  Trading data exported")
+        except Exception as e:
+            print(f"  Trading setup failed: {e}")
+            print("  Signals were still generated and exported successfully.")
+            print("  Check your SYNTHESIS_API_KEY in .env (needs Project Secret Key).")
     elif trade_flag and not use_synthesis:
         print("\n--- Trading requires SYNTHESIS_API_KEY ---")
 
