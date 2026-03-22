@@ -12,6 +12,7 @@ import { SignalBreakdown } from "@/components/signal-breakdown";
 import { TopSignals } from "@/components/top-signals";
 import { ArbitragePanel } from "@/components/arbitrage-panel";
 import { TradingPanel } from "@/components/trading-panel";
+import { PipelineStatus } from "@/components/pipeline-status";
 import { DashboardSkeleton } from "@/components/skeleton";
 
 interface SignalEntry {
@@ -114,6 +115,7 @@ export default function Dashboard() {
   const [markets, setMarkets] = useState<MarketsData | null>(null);
   const [arbitrage, setArbitrage] = useState<ArbitrageData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [pipelineRunning, setPipelineRunning] = useState(false);
   const prevSignalCount = useRef<number>(0);
 
   const fetchData = useCallback(async () => {
@@ -176,9 +178,12 @@ export default function Dashboard() {
         lastRun={signals?.generated_at ? new Date(signals.generated_at).toLocaleString() : ""}
         onRefresh={fetchData}
         refreshInterval={REFRESH_INTERVAL}
+        onPipelineStateChange={setPipelineRunning}
       />
 
       <main className="max-w-7xl mx-auto px-6 py-6 space-y-6">
+        <PipelineStatus isRunning={pipelineRunning} />
+
         <StatsOverview
           metrics={backtest?.metrics || null}
           signalCount={signals?.total_signals || 0}

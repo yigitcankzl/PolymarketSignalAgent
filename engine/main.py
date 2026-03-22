@@ -15,6 +15,9 @@ from engine.signal_generator import generate_all_signals, export_signals, print_
 from engine.backtester import run_backtest, export_results, print_backtest_summary
 from engine.arbitrage import scan_all_arbitrage
 from engine.data_store import load_latest_signals, get_resolved_markets, load_latest_markets
+from engine.config import DATA_DIR
+
+import json as _json
 
 logging.basicConfig(
     level=logging.INFO,
@@ -120,6 +123,23 @@ def _fetch_markets_direct(max_markets: int) -> tuple[list[dict], list[dict]]:
     return markets, []
 
 
+def _update_status(step: int, total: int, label: str, detail: str = "", **extra):
+    """Write pipeline status to file for dashboard polling."""
+    status = {
+        "step": step,
+        "total_steps": total,
+        "label": label,
+        "detail": detail,
+        "progress": round(step / total * 100),
+        "running": step < total,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        **extra,
+    }
+    status_path = DATA_DIR / "pipeline_status.json"
+    status_path.parent.mkdir(parents=True, exist_ok=True)
+    status_path.write_text(_json.dumps(status, indent=2))
+
+
 def run_pipeline(
     max_markets: int = MAX_MARKETS,
     run_backtest_flag: bool = False,
@@ -135,14 +155,18 @@ def run_pipeline(
     start_time = time.time()
     use_synthesis = bool(SYNTHESIS_API_KEY)
 
+    STEPS = 7
     print("\n=== Polymarket Signal Agent ===")
     if use_synthesis:
         print(">>> Powered by Synthesis.trade API <<<")
     print(f"Started at {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}")
     print(f"Max markets: {max_markets}\n")
 
+    _update_status(0, STEPS, "Starting pipeline", f"Max markets: {max_markets}")
+
     # Step 1: Fetch markets
     if use_synthesis:
+        _update_status(1, STEPS, "Fetching markets", "Connecting to Synthesis.trade API (Polymarket + Kalshi)")
         print("[1/6] Fetching markets via Synthesis API (Polymarket + Kalshi)...")
         markets, kalshi_markets = _fetch_markets_synthesis(max_markets)
     else:
@@ -155,6 +179,7 @@ def run_pipeline(
     print(f"  Found {len(markets)} markets\n")
 
     # Step 2: Fetch news
+    _update_status(2, STEPS, "Gathering news", f"Searching Google News for {len(markets)} markets")
     print("[2/6] Gathering news for each market...")
     news_map: dict[str, list[dict]] = {}
     for i, market in enumerate(markets, 1):
@@ -180,12 +205,14 @@ def run_pipeline(
             for m in markets
         ]
     else:
+        _update_status(3, STEPS, "LLM ensemble analysis", "Querying Llama 3.3 70B + Llama 3.1 8B + Qwen3 32B via Groq")
         print("[3/6] Running LLM ensemble analysis...")
         analyzer = LLMAnalyzer()
         analyses = analyzer.batch_analyze(markets, news_map)
     print(f"  Analyzed {len(analyses)} markets\n")
 
     # Step 4: Generate signals
+    _update_status(4, STEPS, "Generating signals", "Edge calculation + Platt calibration + Kelly sizing")
     print("[4/6] Generating signals with Kelly sizing...")
     news_counts = {mid: len(articles) for mid, articles in news_map.items()}
     slugs = {m["id"]: m.get("slug", "") for m in markets}
@@ -193,6 +220,7 @@ def run_pipeline(
     print(f"  Generated {len(signals)} signals\n")
 
     # Step 5: Cross-platform arbitrage scan
+    _update_status(5, STEPS, "Arbitrage scan", "Matching 1,400+ outcomes across Polymarket and Kalshi")
     print("[5/6] Scanning for arbitrage opportunities...")
     arb_result = scan_all_arbitrage(markets, kalshi_markets if kalshi_markets else None)
 
@@ -211,6 +239,7 @@ def run_pipeline(
     result = {"signals": signals, "metrics": None}
 
     if export:
+        _update_status(6, STEPS, "Exporting results", "Saving signals + arbitrage to dashboard")
         print("[6/6] Exporting results...")
         filepath = export_signals(signals)
         print(f"  Signals exported to {filepath}\n")
@@ -261,6 +290,11 @@ def run_pipeline(
                 )
 
     elapsed = time.time() - start_time
+    actionable = len([s for s in signals if s["signal"] != "HOLD"])
+    _update_status(STEPS, STEPS, "Pipeline complete",
+                   f"{actionable} signals, {arb_result['total_opportunities']} arbitrage in {elapsed:.0f}s",
+                   signals_count=len(signals), actionable=actionable,
+                   arbitrage=arb_result["total_opportunities"], elapsed=round(elapsed, 1))
     print(f"\nPipeline completed in {elapsed:.1f}s")
     return result
 

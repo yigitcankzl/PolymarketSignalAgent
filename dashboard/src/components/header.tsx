@@ -9,9 +9,10 @@ interface HeaderProps {
   lastRun: string;
   onRefresh: () => void;
   refreshInterval: number;
+  onPipelineStateChange?: (running: boolean) => void;
 }
 
-export function Header({ marketCount, lastRun, onRefresh, refreshInterval }: HeaderProps) {
+export function Header({ marketCount, lastRun, onRefresh, refreshInterval, onPipelineStateChange }: HeaderProps) {
   const [countdown, setCountdown] = useState(refreshInterval);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
@@ -26,6 +27,7 @@ export function Header({ marketCount, lastRun, onRefresh, refreshInterval }: Hea
   const handleRunPipeline = async () => {
     if (isRunning) return;
     setIsRunning(true);
+    onPipelineStateChange?.(true);
     toast.info("Pipeline started — fetching markets, analyzing with AI...", { duration: 5000 });
 
     try {
@@ -42,6 +44,7 @@ export function Header({ marketCount, lastRun, onRefresh, refreshInterval }: Hea
       toast.error("Pipeline request failed");
     } finally {
       setIsRunning(false);
+      onPipelineStateChange?.(false);
     }
   };
 
