@@ -1,8 +1,8 @@
 # Polymarket Signal Agent
 
-AI-powered signal system that analyzes Polymarket prediction markets using a multi-LLM ensemble (Groq), applies superforecaster methodology with probability calibration, and generates trading signals by detecting edge between AI estimates and market odds.
+AI-powered signal system that analyzes prediction markets via the [Synthesis.trade](https://synthesis.trade) unified API, using a multi-LLM ensemble (Groq) with superforecaster methodology and probability calibration to generate trading signals by detecting edge between AI estimates and market odds across Polymarket and Kalshi.
 
-**Track:** AI-Augmented Systems
+**Track:** AI-Augmented Systems | **Sponsor:** [Synthesis.trade](https://synthesis.trade)
 
 ## What It Does
 
@@ -75,7 +75,9 @@ Polymarket API ──→ Active Markets ──→ News Fetcher ──→ LLM Ens
 polymarket-signal-agent/
 ├── engine/                     # Python core engine
 │   ├── config.py               # API keys, constants, thresholds
-│   ├── polymarket_client.py    # Polymarket API client
+│   ├── synthesis_client.py     # Synthesis.trade unified API client
+│   ├── polymarket_client.py    # Polymarket API client (fallback)
+│   ├── kalshi_client.py        # Kalshi API client
 │   ├── news_fetcher.py         # Multi-source news gathering
 │   ├── llm_analyzer.py         # Multi-LLM ensemble + calibration
 │   ├── signal_generator.py     # Edge + Kelly + signal generation
@@ -98,8 +100,9 @@ polymarket-signal-agent/
 
 ### Engine
 - **Python 3.11+** with type hints
+- **[Synthesis.trade API](https://synthesis.trade)** - unified Polymarket + Kalshi access, cross-platform arbitrage, news, orderbooks
 - **Groq API** (3-model ensemble: Llama 3.3 70B, Llama 3.1 8B, Gemma2 9B)
-- **Polymarket Gamma API** - market data
+- **Polymarket Gamma API** - fallback market data
 - **feedparser** - Google News RSS parsing
 - **httpx** - HTTP client with rate limiting
 
