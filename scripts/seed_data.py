@@ -288,16 +288,8 @@ def generate_backtest_data(signals: list[dict], markets: list[dict]) -> dict:
 def main():
     base_time = datetime(2026, 3, 22, 12, 0, 0, tzinfo=timezone.utc)
 
-    # Generate markets
+    # Generate markets and signals internally (only for backtest calculation)
     markets = [generate_market(i, m, base_time) for i, m in enumerate(MARKETS)]
-
-    markets_data = {
-        "timestamp": base_time.strftime("%Y%m%dT%H%M%SZ"),
-        "count": len(markets),
-        "markets": markets,
-    }
-
-    # Generate signals (one per market)
     signals = []
     for i, market in enumerate(markets):
         sig = generate_signal(market, base_time, offset_hours=i * 2)
@@ -309,7 +301,6 @@ def main():
             continue
         sig = signals[i]
         signal_type = sig["signal"]
-        # System is right ~62% of the time on actionable signals
         if signal_type in ("STRONG_BUY", "BUY"):
             market["resolution"] = 1.0 if random.random() < 0.64 else 0.0
         elif signal_type in ("STRONG_SELL", "SELL"):
@@ -317,146 +308,20 @@ def main():
         else:
             market["resolution"] = 1.0 if random.random() < 0.5 else 0.0
 
-    # Update markets_data after setting resolutions
-    markets_data["markets"] = markets
-
-    signals.sort(key=lambda s: s["score"], reverse=True)
-
-    signals_data = {
-        "generated_at": base_time.isoformat(),
-        "total_signals": len(signals),
-        "actionable_signals": len([s for s in signals if s["signal"] != "HOLD"]),
-        "signals": signals,
-    }
-
-    # Generate backtest
+    # Only generate backtest data (signals, markets, arbitrage come from live API)
     backtest_data = generate_backtest_data(signals, markets)
     backtest_data["run_at"] = base_time.isoformat()
 
-    # Generate arbitrage opportunities
-    arb_data = {
-        "scanned_at": base_time.isoformat(),
-        "markets_scanned": len(markets),
-        "intra_market": [
-            {
-                "type": "intra_market",
-                "market_id": markets[5]["id"],
-                "question": markets[5]["question"],
-                "yes_price": round(markets[5]["yes_odds"], 4),
-                "no_price": round(1 - markets[5]["yes_odds"] - 0.03, 4),
-                "total_cost": round(markets[5]["yes_odds"] + (1 - markets[5]["yes_odds"] - 0.03), 4),
-                "guaranteed_profit_pct": 3.0,
-                "slug": markets[5].get("slug", ""),
-                "timestamp": base_time.isoformat(),
-            },
-        ],
-        "related_market": [
-            {
-                "type": "related_market",
-                "market_1": {"id": markets[0]["id"], "question": markets[0]["question"], "odds": markets[0]["yes_odds"]},
-                "market_2": {"id": markets[3]["id"], "question": markets[3]["question"], "odds": markets[3]["yes_odds"]},
-                "odds_difference": round(abs(markets[0]["yes_odds"] - markets[3]["yes_odds"]), 4),
-                "overlap_score": 0.42,
-                "timestamp": base_time.isoformat(),
-            },
-        ],
-        "cross_platform": [
-            {
-                "type": "cross_platform",
-                "polymarket": {
-                    "id": markets[0]["id"],
-                    "question": markets[0]["question"],
-                    "yes_price": markets[0]["yes_odds"],
-                    "slug": markets[0]["slug"],
-                },
-                "kalshi": {
-                    "id": "FED-RATE-CUT-JUN26",
-                    "question": "Fed to cut rates at June 2026 FOMC?",
-                    "yes_price": round(markets[0]["yes_odds"] + 0.07, 4),
-                    "event_ticker": "FED-RATE-CUT",
-                },
-                "price_difference": 0.07,
-                "profit_potential_pct": 7.0,
-                "similarity_score": 0.72,
-                "action": "BUY on Polymarket, SELL on Kalshi",
-                "buy_platform": "polymarket",
-                "sell_platform": "kalshi",
-                "buy_price": markets[0]["yes_odds"],
-                "sell_price": round(markets[0]["yes_odds"] + 0.07, 4),
-                "synthesis_url": f"https://synthesis.trade/market/{markets[0]['slug']}",
-                "timestamp": base_time.isoformat(),
-            },
-            {
-                "type": "cross_platform",
-                "polymarket": {
-                    "id": markets[1]["id"],
-                    "question": markets[1]["question"],
-                    "yes_price": markets[1]["yes_odds"],
-                    "slug": markets[1]["slug"],
-                },
-                "kalshi": {
-                    "id": "BTC-150K-Q2-26",
-                    "question": "Bitcoin above $150,000 by June 30, 2026?",
-                    "yes_price": round(markets[1]["yes_odds"] - 0.05, 4),
-                    "event_ticker": "BTC-150K",
-                },
-                "price_difference": 0.05,
-                "profit_potential_pct": 5.0,
-                "similarity_score": 0.65,
-                "action": "BUY on Kalshi, SELL on Polymarket",
-                "buy_platform": "kalshi",
-                "sell_platform": "polymarket",
-                "buy_price": round(markets[1]["yes_odds"] - 0.05, 4),
-                "sell_price": markets[1]["yes_odds"],
-                "synthesis_url": f"https://synthesis.trade/market/{markets[1]['slug']}",
-                "timestamp": base_time.isoformat(),
-            },
-            {
-                "type": "cross_platform",
-                "polymarket": {
-                    "id": markets[4]["id"],
-                    "question": markets[4]["question"],
-                    "yes_price": markets[4]["yes_odds"],
-                    "slug": markets[4]["slug"],
-                },
-                "kalshi": {
-                    "id": "SPACEX-ORBITAL-APR26",
-                    "question": "SpaceX orbital Starship flight before May 2026?",
-                    "yes_price": round(markets[4]["yes_odds"] + 0.09, 4),
-                    "event_ticker": "SPACEX-ORBITAL",
-                },
-                "price_difference": 0.09,
-                "profit_potential_pct": 9.0,
-                "similarity_score": 0.58,
-                "action": "BUY on Polymarket, SELL on Kalshi",
-                "buy_platform": "polymarket",
-                "sell_platform": "kalshi",
-                "buy_price": markets[4]["yes_odds"],
-                "sell_price": round(markets[4]["yes_odds"] + 0.09, 4),
-                "synthesis_url": f"https://synthesis.trade/market/{markets[4]['slug']}",
-                "timestamp": base_time.isoformat(),
-            },
-        ],
-        "kalshi_markets_scanned": 45,
-        "total_opportunities": 5,
-    }
-
-    # Save everything
-    for subdir in ["markets", "signals", "backtest", "arbitrage"]:
-        (DATA_DIR / subdir).mkdir(parents=True, exist_ok=True)
-
-    (DATA_DIR / "markets" / "latest.json").write_text(json.dumps(markets_data, indent=2))
-    (DATA_DIR / "signals" / "latest.json").write_text(json.dumps(signals_data, indent=2))
+    # Save ONLY backtest (everything else comes from live pipeline)
+    (DATA_DIR / "backtest").mkdir(parents=True, exist_ok=True)
     (DATA_DIR / "backtest" / "latest.json").write_text(json.dumps(backtest_data, indent=2))
-    (DATA_DIR / "arbitrage" / "latest.json").write_text(json.dumps(arb_data, indent=2))
 
-    print(f"Seed data generated:")
-    print(f"  Markets:  {len(markets)}")
-    print(f"  Signals:  {len(signals)} ({signals_data['actionable_signals']} actionable)")
+    print(f"Backtest seed data generated:")
     print(f"  Trades:   {len(backtest_data['trades'])}")
     print(f"  Hit Rate: {backtest_data['metrics'].get('hit_rate', 0):.1%}")
     print(f"  Total PnL: {backtest_data['metrics'].get('total_pnl', 0):+.4f}")
-    print(f"\nFiles saved to {DATA_DIR}/")
+    print(f"\nSaved to {DATA_DIR}/backtest/latest.json")
+    print(f"(signals, markets, arbitrage come from live pipeline)")
 
 
 if __name__ == "__main__":
