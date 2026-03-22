@@ -1,5 +1,6 @@
 "use client";
 
+import { motion } from "motion/react";
 import { formatPercent, formatPnL } from "@/lib/utils";
 import { CheckCircle, XCircle, TrendingUp, TrendingDown } from "lucide-react";
 
@@ -47,7 +48,12 @@ export function BacktestPanel({ metrics }: BacktestPanelProps) {
   ];
 
   return (
-    <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 0.5, duration: 0.5 }}
+      className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden"
+    >
       <div className="px-5 py-4 border-b border-zinc-800 flex items-center justify-between">
         <div>
           <h2 className="text-sm font-semibold text-white">Backtest Results</h2>
@@ -98,6 +104,6 @@ export function BacktestPanel({ metrics }: BacktestPanelProps) {
           </div>
         </>
       )}
-    </div>
+    </motion.div>
   );
 }

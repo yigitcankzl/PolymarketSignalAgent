@@ -1,5 +1,6 @@
 "use client";
 
+import { motion } from "motion/react";
 import {
   BarChart,
   Bar,
@@ -41,7 +42,12 @@ export function EdgeChart({ signals }: EdgeChartProps) {
   }
 
   return (
-    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5">
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 0.8, duration: 0.5 }}
+      className="bg-zinc-900 border border-zinc-800 rounded-xl p-5"
+    >
       <div className="mb-4">
         <h2 className="text-sm font-semibold text-white">Edge Distribution</h2>
         <p className="text-xs text-zinc-500 mt-1">LLM probability vs market odds (%)</p>
@@ -83,6 +89,6 @@ export function EdgeChart({ signals }: EdgeChartProps) {
           </Bar>
         </BarChart>
       </ResponsiveContainer>
-    </div>
+    </motion.div>
   );
 }

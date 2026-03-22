@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
+import { Toaster, toast } from "sonner";
 import { Header } from "@/components/header";
 import { StatsOverview } from "@/components/stats-overview";
 import { SignalTable } from "@/components/signal-table";
@@ -9,6 +10,7 @@ import { EdgeChart } from "@/components/edge-chart";
 import { BacktestPanel } from "@/components/backtest-panel";
 import { SignalBreakdown } from "@/components/signal-breakdown";
 import { TopSignals } from "@/components/top-signals";
+import { DashboardSkeleton } from "@/components/skeleton";
 
 interface SignalEntry {
   market_id: string;
@@ -23,6 +25,15 @@ interface SignalEntry {
   key_factors: string[];
   timestamp: string;
   news_count: number;
+  kelly_fraction?: number;
+  polymarket_url?: string;
+  raw_probability?: number;
+  ensemble?: {
+    models_used: number;
+    model_predictions: Record<string, number>;
+    spread: number;
+    calibrated: number;
+  };
 }
 
 interface PnLPoint {
@@ -76,71 +87,87 @@ interface MarketsData {
   count: number;
 }
 
+const REFRESH_INTERVAL = 30;
+
 export default function Dashboard() {
   const [signals, setSignals] = useState<SignalData | null>(null);
   const [backtest, setBacktest] = useState<BacktestData | null>(null);
   const [markets, setMarkets] = useState<MarketsData | null>(null);
   const [loading, setLoading] = useState(true);
+  const prevSignalCount = useRef<number>(0);
 
-  useEffect(() => {
-    async function fetchData() {
-      try {
-        const [sigRes, btRes, mkRes] = await Promise.all([
-          fetch("/api/signals"),
-          fetch("/api/backtest"),
-          fetch("/api/markets"),
-        ]);
-        const [sigData, btData, mkData] = await Promise.all([
-          sigRes.json(),
-          btRes.json(),
-          mkRes.json(),
-        ]);
-        setSignals(sigData);
-        setBacktest(btData);
-        setMarkets(mkData);
-      } catch (err) {
-        console.error("Failed to fetch data:", err);
-      } finally {
-        setLoading(false);
+  const fetchData = useCallback(async () => {
+    try {
+      const [sigRes, btRes, mkRes] = await Promise.all([
+        fetch("/api/signals"),
+        fetch("/api/backtest"),
+        fetch("/api/markets"),
+      ]);
+      const [sigData, btData, mkData] = await Promise.all([
+        sigRes.json(),
+        btRes.json(),
+        mkRes.json(),
+      ]);
+
+      // Detect new signals
+      if (prevSignalCount.current > 0 && sigData.total_signals > prevSignalCount.current) {
+        const diff = sigData.total_signals - prevSignalCount.current;
+        toast.success(`${diff} new signal${diff > 1 ? "s" : ""} detected`, {
+          description: "Dashboard updated with latest data",
+        });
       }
+      prevSignalCount.current = sigData.total_signals;
+
+      setSignals(sigData);
+      setBacktest(btData);
+      setMarkets(mkData);
+    } catch (err) {
+      console.error("Failed to fetch data:", err);
+    } finally {
+      setLoading(false);
     }
-    fetchData();
   }, []);
 
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
   if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-zinc-500 text-sm">Loading dashboard...</div>
-      </div>
-    );
+    return <DashboardSkeleton />;
   }
 
   const allSignals = signals?.signals || [];
 
   return (
     <div className="min-h-screen bg-zinc-950">
+      <Toaster
+        theme="dark"
+        position="top-right"
+        toastOptions={{
+          style: { background: "#18181b", border: "1px solid #3f3f46", color: "#fafafa" },
+        }}
+      />
+
       <Header
         marketCount={markets?.count || 0}
         lastRun={signals?.generated_at ? new Date(signals.generated_at).toLocaleString() : ""}
+        onRefresh={fetchData}
+        refreshInterval={REFRESH_INTERVAL}
       />
 
       <main className="max-w-7xl mx-auto px-6 py-6 space-y-6">
-        {/* Stats Overview */}
         <StatsOverview
           metrics={backtest?.metrics || null}
           signalCount={signals?.total_signals || 0}
         />
 
-        {/* Main Grid: 2 columns */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Left column - wide */}
           <div className="lg:col-span-2 space-y-6">
             <SignalTable signals={allSignals} />
             <PnLChart data={backtest?.pnl_curve || []} />
             <EdgeChart signals={allSignals} />
           </div>
 
-          {/* Right column - narrow */}
           <div className="space-y-6">
             <BacktestPanel metrics={backtest?.metrics || null} />
             <SignalBreakdown signals={allSignals} />

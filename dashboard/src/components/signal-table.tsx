@@ -1,5 +1,8 @@
 "use client";
 
+import { useState } from "react";
+import { motion, AnimatePresence } from "motion/react";
+import { ChevronDown, ExternalLink } from "lucide-react";
 import { cn, getSignalBg, formatPercent } from "@/lib/utils";
 
 interface Signal {
@@ -12,14 +15,109 @@ interface Signal {
   signal: string;
   score: number;
   reasoning: string;
+  key_factors: string[];
   news_count: number;
+  kelly_fraction?: number;
+  polymarket_url?: string;
+  ensemble?: {
+    models_used: number;
+    model_predictions: Record<string, number>;
+    spread: number;
+  };
 }
 
 interface SignalTableProps {
   signals: Signal[];
 }
 
+function SignalDetail({ signal }: { signal: Signal }) {
+  return (
+    <motion.div
+      initial={{ height: 0, opacity: 0 }}
+      animate={{ height: "auto", opacity: 1 }}
+      exit={{ height: 0, opacity: 0 }}
+      transition={{ duration: 0.3 }}
+      className="overflow-hidden"
+    >
+      <div className="px-5 py-4 bg-zinc-800/30 border-t border-zinc-700/50">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <h4 className="text-xs font-semibold text-zinc-400 uppercase mb-2">AI Reasoning</h4>
+            <p className="text-sm text-zinc-300 leading-relaxed">{signal.reasoning}</p>
+
+            {signal.key_factors && signal.key_factors.length > 0 && (
+              <div className="mt-3">
+                <h4 className="text-xs font-semibold text-zinc-400 uppercase mb-1.5">Key Factors</h4>
+                <div className="flex flex-wrap gap-1.5">
+                  {signal.key_factors.map((factor, i) => (
+                    <span key={i} className="text-[10px] px-2 py-0.5 bg-zinc-700/50 text-zinc-300 rounded-full">
+                      {factor}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-3">
+            {signal.kelly_fraction !== undefined && signal.kelly_fraction > 0 && (
+              <div>
+                <h4 className="text-xs font-semibold text-zinc-400 uppercase mb-1">Position Size (Kelly)</h4>
+                <div className="flex items-center gap-2">
+                  <div className="h-2 bg-zinc-700 rounded-full flex-1">
+                    <div
+                      className="h-full bg-blue-500 rounded-full"
+                      style={{ width: `${Math.min(signal.kelly_fraction * 100 / 5 * 100, 100)}%` }}
+                    />
+                  </div>
+                  <span className="text-sm font-mono text-blue-400">{(signal.kelly_fraction * 100).toFixed(1)}%</span>
+                </div>
+              </div>
+            )}
+
+            {signal.ensemble && (
+              <div>
+                <h4 className="text-xs font-semibold text-zinc-400 uppercase mb-1.5">
+                  Ensemble ({signal.ensemble.models_used} models)
+                </h4>
+                <div className="space-y-1">
+                  {Object.entries(signal.ensemble.model_predictions).map(([model, prob]) => (
+                    <div key={model} className="flex items-center justify-between text-xs">
+                      <span className="text-zinc-500 truncate mr-2">{model.split("-").slice(0, 2).join("-")}</span>
+                      <span className="text-zinc-300 font-mono">{formatPercent(prob)}</span>
+                    </div>
+                  ))}
+                  <div className="flex items-center justify-between text-xs pt-1 border-t border-zinc-700/50">
+                    <span className="text-zinc-400">Spread</span>
+                    <span className={cn("font-mono", signal.ensemble.spread > 0.1 ? "text-amber-400" : "text-green-400")}>
+                      {formatPercent(signal.ensemble.spread)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {signal.polymarket_url && (
+              <a
+                href={signal.polymarket_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 text-xs text-blue-400 hover:text-blue-300 transition-colors"
+              >
+                <ExternalLink className="w-3 h-3" />
+                View on Polymarket
+              </a>
+            )}
+          </div>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
 export function SignalTable({ signals }: SignalTableProps) {
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
   if (!signals.length) {
     return (
       <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-8 text-center text-zinc-500">
@@ -29,70 +127,107 @@ export function SignalTable({ signals }: SignalTableProps) {
   }
 
   return (
-    <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 0.4, duration: 0.5 }}
+      className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden"
+    >
       <div className="px-5 py-4 border-b border-zinc-800">
         <h2 className="text-sm font-semibold text-white">Active Signals</h2>
-        <p className="text-xs text-zinc-500 mt-1">Ranked by score (edge x confidence)</p>
+        <p className="text-xs text-zinc-500 mt-1">Click any row to expand AI reasoning and ensemble details</p>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-zinc-800 text-zinc-500 text-xs uppercase tracking-wider">
-              <th className="text-left px-5 py-3 font-medium">Market</th>
+              <th className="w-8 px-2 py-3" />
+              <th className="text-left px-3 py-3 font-medium">Market</th>
               <th className="text-right px-3 py-3 font-medium">Odds</th>
               <th className="text-right px-3 py-3 font-medium">LLM</th>
               <th className="text-right px-3 py-3 font-medium">Edge</th>
               <th className="text-right px-3 py-3 font-medium">Conf</th>
               <th className="text-center px-3 py-3 font-medium">Signal</th>
+              <th className="text-right px-3 py-3 font-medium">Kelly</th>
               <th className="text-right px-5 py-3 font-medium">Score</th>
             </tr>
           </thead>
           <tbody>
             {signals.map((s, i) => (
-              <tr
+              <motion.tr
                 key={s.market_id}
-                className={cn(
-                  "border-b border-zinc-800/50 hover:bg-zinc-800/30 transition-colors",
-                  i % 2 === 0 ? "bg-zinc-900" : "bg-zinc-900/50"
-                )}
+                initial={{ opacity: 0, x: -10 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: 0.5 + i * 0.03, duration: 0.3 }}
+                className="contents"
               >
-                <td className="px-5 py-3">
-                  <div className="max-w-xs">
-                    <p className="text-zinc-200 text-sm truncate">{s.question}</p>
-                    <p className="text-zinc-600 text-xs mt-0.5">{s.news_count} news articles</p>
-                  </div>
-                </td>
-                <td className="text-right px-3 py-3 text-zinc-300 font-mono text-xs">
-                  {formatPercent(s.market_odds)}
-                </td>
-                <td className="text-right px-3 py-3 text-zinc-300 font-mono text-xs">
-                  {formatPercent(s.llm_probability)}
-                </td>
-                <td className={cn(
-                  "text-right px-3 py-3 font-mono text-xs font-medium",
-                  s.edge > 0 ? "text-green-400" : s.edge < 0 ? "text-red-400" : "text-zinc-400"
-                )}>
-                  {s.edge > 0 ? "+" : ""}{formatPercent(s.edge)}
-                </td>
-                <td className="text-right px-3 py-3 text-zinc-300 font-mono text-xs">
-                  {formatPercent(s.confidence)}
-                </td>
-                <td className="text-center px-3 py-3">
-                  <span className={cn(
-                    "inline-block px-2.5 py-1 rounded-full text-xs font-medium border",
-                    getSignalBg(s.signal)
+                <tr
+                  onClick={() => setExpandedId(expandedId === s.market_id ? null : s.market_id)}
+                  className={cn(
+                    "border-b border-zinc-800/50 hover:bg-zinc-800/30 transition-colors cursor-pointer",
+                    expandedId === s.market_id && "bg-zinc-800/20",
+                  )}
+                >
+                  <td className="px-2 py-3">
+                    <ChevronDown className={cn(
+                      "w-3.5 h-3.5 text-zinc-600 transition-transform",
+                      expandedId === s.market_id && "rotate-180"
+                    )} />
+                  </td>
+                  <td className="px-3 py-3">
+                    <p className="text-zinc-200 text-sm truncate max-w-xs">{s.question}</p>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <span className="text-zinc-600 text-[10px]">{s.news_count} news</span>
+                      {s.ensemble && (
+                        <span className="text-blue-400/60 text-[10px]">{s.ensemble.models_used} models</span>
+                      )}
+                    </div>
+                  </td>
+                  <td className="text-right px-3 py-3 text-zinc-300 font-mono text-xs">
+                    {formatPercent(s.market_odds)}
+                  </td>
+                  <td className="text-right px-3 py-3 text-zinc-300 font-mono text-xs">
+                    {formatPercent(s.llm_probability)}
+                  </td>
+                  <td className={cn(
+                    "text-right px-3 py-3 font-mono text-xs font-medium",
+                    s.edge > 0 ? "text-green-400" : s.edge < 0 ? "text-red-400" : "text-zinc-400"
                   )}>
-                    {s.signal}
-                  </span>
-                </td>
-                <td className="text-right px-5 py-3 text-zinc-200 font-mono text-xs font-medium">
-                  {s.score.toFixed(4)}
-                </td>
-              </tr>
+                    {s.edge > 0 ? "+" : ""}{formatPercent(s.edge)}
+                  </td>
+                  <td className="text-right px-3 py-3 text-zinc-300 font-mono text-xs">
+                    {formatPercent(s.confidence)}
+                  </td>
+                  <td className="text-center px-3 py-3">
+                    <span className={cn(
+                      "inline-block px-2.5 py-1 rounded-full text-xs font-medium border",
+                      getSignalBg(s.signal),
+                      (s.signal === "STRONG_BUY" || s.signal === "STRONG_SELL") && "animate-pulse"
+                    )}>
+                      {s.signal}
+                    </span>
+                  </td>
+                  <td className="text-right px-3 py-3 text-blue-400/80 font-mono text-xs">
+                    {s.kelly_fraction ? `${(s.kelly_fraction * 100).toFixed(1)}%` : "—"}
+                  </td>
+                  <td className="text-right px-5 py-3 text-zinc-200 font-mono text-xs font-medium">
+                    {s.score.toFixed(4)}
+                  </td>
+                </tr>
+                <AnimatePresence>
+                  {expandedId === s.market_id && (
+                    <tr>
+                      <td colSpan={9}>
+                        <SignalDetail signal={s} />
+                      </td>
+                    </tr>
+                  )}
+                </AnimatePresence>
+              </motion.tr>
             ))}
           </tbody>
         </table>
       </div>
-    </div>
+    </motion.div>
   );
 }

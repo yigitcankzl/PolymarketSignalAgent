@@ -1,5 +1,6 @@
 "use client";
 
+import { motion } from "motion/react";
 import {
   AreaChart,
   Area,
@@ -36,7 +37,12 @@ export function PnLChart({ data }: PnLChartProps) {
   const isPositive = data[data.length - 1]?.cumulative_pnl >= 0;
 
   return (
-    <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5">
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 0.6, duration: 0.5 }}
+      className="bg-zinc-900 border border-zinc-800 rounded-xl p-5"
+    >
       <div className="mb-4">
         <h2 className="text-sm font-semibold text-white">Cumulative P&L</h2>
         <p className="text-xs text-zinc-500 mt-1">
@@ -93,6 +99,6 @@ export function PnLChart({ data }: PnLChartProps) {
           />
         </AreaChart>
       </ResponsiveContainer>
-    </div>
+    </motion.div>
   );
 }
