@@ -43,7 +43,12 @@ export function Header({ marketCount, lastRun, onRefresh, refreshInterval }: Hea
           </div>
           <div>
             <h1 className="text-lg font-semibold text-white">Polymarket Signal Agent</h1>
-            <p className="text-xs text-zinc-500">AI-Powered Prediction Market Signals</p>
+            <p className="text-xs text-zinc-500">
+              AI-Powered Signals &middot; via{" "}
+              <a href="https://synthesis.trade" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300">
+                Synthesis.trade
+              </a>
+            </p>
           </div>
         </div>
         <div className="flex items-center gap-5 text-sm">
