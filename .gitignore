@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+venv/
+.venv/
+env/
+
+# Environment
+.env
+.env.local
+
+# Data (keep sample files)
+data/markets/*.json
+data/signals/*.json
+data/news/*.json
+data/backtest/*.json
+!data/**/.gitkeep
+!data/**/sample_*.json
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+dashboard/.next/
+dashboard/node_modules/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Matplotlib
+*.png
+!docs/*.png
+!public/*.png
