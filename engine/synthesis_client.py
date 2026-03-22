@@ -243,112 +243,147 @@ class SynthesisClient:
 
     # ── Cross-platform arbitrage ───────────────────────────────────
 
-    def detect_arbitrage(
-        self,
-        polymarket_markets: list[dict],
-        min_price_diff: float = 0.03,
-        max_search: int = 15,
-    ) -> list[dict]:
-        """Detect cross-platform arbitrage by searching for matching markets.
+    @staticmethod
+    def _event_similarity(e1: str, e2: str) -> float:
+        """Check if two event titles refer to the same competition."""
+        e1, e2 = e1.lower().strip(), e2.lower().strip()
+        # Normalize common variations
+        for old, new in [
+            ("2025-26", "2026"), ("2025–26", "2026"), ("25-26", "2026"),
+            ("uefa ", ""), ("fifa ", ""), (" - winner", ""),
+            ("?", ""), ("winner", ""), ("champion", ""),
+            ("pro hockey", "nhl stanley cup"), ("pro baseball", "mlb"),
+            ("men's ", ""), ("2026 ", ""), ("the ", ""),
+        ]:
+            e1 = e1.replace(old, new)
+            e2 = e2.replace(old, new)
 
-        For each Polymarket market, searches Kalshi for the same event
-        via Synthesis search API and compares prices.
+        w1 = set(e1.split())
+        w2 = set(e2.split())
+        if not w1 or not w2:
+            return 0.0
+        return len(w1 & w2) / max(len(w1 | w2), 1)
+
+    def detect_arbitrage(self, min_price_diff: float = 0.02) -> list[dict]:
+        """Detect cross-platform arbitrage by matching outcomes across platforms.
+
+        Fetches all markets from Polymarket and Kalshi, matches by outcome
+        name, then verifies the event is the same before flagging price differences.
         """
+        # Build flat outcome maps from both platforms
+        pm_outcomes: dict[str, dict] = {}
+        for entry in self.get_polymarket_markets(limit=50):
+            event = entry.get("event", {})
+            for m in entry.get("markets", []):
+                outcome = (m.get("outcome") or "").strip().lower()
+                price = float(m.get("left_price", 0))
+                if outcome and price > 0:
+                    pm_outcomes[outcome] = {
+                        "price": price,
+                        "question": m.get("question", ""),
+                        "outcome_raw": m.get("outcome", ""),
+                        "event_title": event.get("title", ""),
+                        "slug": event.get("slug", ""),
+                        "id": m.get("condition_id", ""),
+                    }
+
+        km_outcomes: dict[str, dict] = {}
+        for entry in self.get_kalshi_markets(limit=50):
+            event = entry.get("event", {})
+            for m in entry.get("markets", []):
+                outcome = (m.get("outcome") or "").strip().lower()
+                price = float(m.get("left_price", 0))
+                if outcome and price > 0:
+                    km_outcomes[outcome] = {
+                        "price": price,
+                        "question": m.get("title", ""),
+                        "outcome_raw": m.get("outcome", ""),
+                        "event_title": event.get("title", ""),
+                        "id": m.get("market_id", ""),
+                    }
+
+        logger.info(f"Arbitrage scan: {len(pm_outcomes)} PM outcomes, {len(km_outcomes)} KA outcomes")
+
+        # Find matching outcomes with same event
+        matches = set(pm_outcomes.keys()) & set(km_outcomes.keys())
         opportunities = []
-        searched = 0
 
-        for pm in polymarket_markets:
-            if searched >= max_search:
-                break
+        for outcome in matches:
+            pm = pm_outcomes[outcome]
+            km = km_outcomes[outcome]
 
-            pm_question = pm.get("question", pm.get("title", ""))
-            pm_outcome = pm.get("outcome", "")
-            if not pm_question:
+            # Verify events are the same (not just same team in different competitions)
+            event_sim = self._event_similarity(pm["event_title"], km["event_title"])
+            if event_sim < 0.25:
                 continue
 
-            # Build search query from key terms
-            search_terms = pm_outcome if pm_outcome else pm_question
-            # Shorten to key words for better search
-            words = search_terms.split()[:5]
-            query = " ".join(words)
-
-            if len(query) < 3:
+            diff = abs(pm["price"] - km["price"])
+            if diff < min_price_diff:
                 continue
 
-            searched += 1
-            logger.info(f"  Arb search {searched}/{max_search}: '{query}'")
+            if pm["price"] < km["price"]:
+                action = "BUY on Polymarket, SELL on Kalshi"
+                buy_price, sell_price = pm["price"], km["price"]
+            else:
+                action = "BUY on Kalshi, SELL on Polymarket"
+                buy_price, sell_price = km["price"], pm["price"]
 
-            try:
-                kalshi_results = self.search_markets(query, venue="kalshi")
-            except Exception as e:
-                logger.warning(f"  Search failed: {e}")
-                continue
-
-            if not kalshi_results:
-                continue
-
-            pm_price = float(pm.get("yes_odds", pm.get("left_price", 0.5)))
-
-            # Check each Kalshi result for price discrepancy
-            for km_entry in kalshi_results[:3]:
-                km_markets = km_entry.get("markets", [km_entry])
-                if isinstance(km_markets, dict):
-                    km_markets = [km_markets]
-
-                for km in (km_markets if isinstance(km_markets, list) else [km_markets]):
-                    km_title = km.get("title", km.get("question", ""))
-                    km_price = float(km.get("left_price", km.get("yes_price", 0)))
-
-                    if km_price <= 0 or km_price >= 1:
-                        continue
-
-                    diff = abs(pm_price - km_price)
-                    if diff < min_price_diff:
-                        continue
-
-                    if pm_price < km_price:
-                        action = "BUY on Polymarket, SELL on Kalshi"
-                        buy_price, sell_price = pm_price, km_price
-                    else:
-                        action = "BUY on Kalshi, SELL on Polymarket"
-                        buy_price, sell_price = km_price, pm_price
-
-                    slug = pm.get("event_slug", pm.get("slug", ""))
-                    opportunities.append({
-                        "type": "cross_platform",
-                        "polymarket": {
-                            "id": pm.get("id", ""),
-                            "question": pm_question,
-                            "outcome": pm_outcome,
-                            "yes_price": round(pm_price, 4),
-                            "slug": slug,
-                        },
-                        "kalshi": {
-                            "id": km.get("market_id", km.get("id", "")),
-                            "question": km_title,
-                            "yes_price": round(km_price, 4),
-                        },
-                        "price_difference": round(diff, 4),
-                        "profit_potential_pct": round(diff * 100, 2),
-                        "action": action,
-                        "buy_price": round(buy_price, 4),
-                        "sell_price": round(sell_price, 4),
-                        "synthesis_url": f"https://synthesis.trade/market/{slug}" if slug else "",
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                    })
-                    break  # One match per Kalshi result is enough
+            slug = pm.get("slug", "")
+            opportunities.append({
+                "type": "cross_platform",
+                "polymarket": {
+                    "id": pm["id"],
+                    "question": pm["question"],
+                    "outcome": pm["outcome_raw"],
+                    "event": pm["event_title"],
+                    "yes_price": round(pm["price"], 4),
+                    "slug": slug,
+                },
+                "kalshi": {
+                    "id": km["id"],
+                    "question": km["question"],
+                    "outcome": km["outcome_raw"],
+                    "event": km["event_title"],
+                    "yes_price": round(km["price"], 4),
+                },
+                "price_difference": round(diff, 4),
+                "profit_potential_pct": round(diff * 100, 2),
+                "event_similarity": round(event_sim, 3),
+                "action": action,
+                "buy_price": round(buy_price, 4),
+                "sell_price": round(sell_price, 4),
+                "synthesis_url": f"https://synthesis.trade/market/{slug}" if slug else "",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            })
 
         opportunities.sort(key=lambda x: x["price_difference"], reverse=True)
-        logger.info(f"Synthesis arbitrage: {len(opportunities)} opportunities found")
+        logger.info(f"Synthesis arbitrage: {len(opportunities)} verified opportunities")
 
         # Save results
         SYNTHESIS_MARKETS_DIR.mkdir(parents=True, exist_ok=True)
-        arb_path = SYNTHESIS_MARKETS_DIR / "arbitrage.json"
-        arb_path.write_text(json.dumps({
+        arb_data = {
             "scanned_at": datetime.now(timezone.utc).isoformat(),
+            "polymarket_outcomes": len(pm_outcomes),
+            "kalshi_outcomes": len(km_outcomes),
+            "matched_outcomes": len(matches),
             "opportunities": opportunities,
             "total": len(opportunities),
-        }, indent=2))
+        }
+        (SYNTHESIS_MARKETS_DIR / "arbitrage.json").write_text(json.dumps(arb_data, indent=2))
+
+        # Also save to main arbitrage dir for dashboard
+        arb_dir = DATA_DIR / "arbitrage"
+        arb_dir.mkdir(parents=True, exist_ok=True)
+        existing = {}
+        arb_latest = arb_dir / "latest.json"
+        if arb_latest.exists():
+            try:
+                existing = json.loads(arb_latest.read_text())
+            except Exception:
+                pass
+        existing["cross_platform"] = opportunities
+        existing["total_opportunities"] = existing.get("total_opportunities", 0) + len(opportunities)
+        arb_latest.write_text(json.dumps(existing, indent=2))
 
         return opportunities
 

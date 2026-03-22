@@ -195,18 +195,14 @@ def run_pipeline(
     print("[5/6] Scanning for arbitrage opportunities...")
     arb_result = scan_all_arbitrage(markets, kalshi_markets if kalshi_markets else None)
 
-    # Search-based cross-platform arb via Synthesis API
+    # Cross-platform arb via Synthesis outcome matching
     if use_synthesis:
-        print("  Running Synthesis cross-platform search...")
+        print("  Running cross-platform outcome matching (Polymarket vs Kalshi)...")
         with SynthesisClient() as client:
-            synthesis_arbs = client.detect_arbitrage(markets, min_price_diff=0.03, max_search=10)
+            synthesis_arbs = client.detect_arbitrage(min_price_diff=0.02)
             if synthesis_arbs:
                 arb_result["cross_platform"] = synthesis_arbs
                 arb_result["total_opportunities"] += len(synthesis_arbs)
-                # Re-save with updated data
-                from engine.config import DATA_DIR
-                arb_path = DATA_DIR / "arbitrage" / "latest.json"
-                arb_path.write_text(json.dumps(arb_result, indent=2, default=str))
 
     print(f"  Found {arb_result['total_opportunities']} arbitrage opportunities\n")
 
