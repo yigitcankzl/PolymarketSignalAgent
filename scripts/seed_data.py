@@ -65,6 +65,19 @@ def generate_market(idx: int, m: dict, base_time: datetime) -> dict:
     }
 
 
+def _generate_sparkline(current_price: float, points: int = 20) -> list[float]:
+    """Generate realistic-looking price sparkline data."""
+    prices = []
+    p = current_price + random.gauss(0, 0.08)
+    for _ in range(points):
+        p += random.gauss(0, 0.015)
+        p = max(0.05, min(0.95, p))
+        prices.append(round(p, 4))
+    # Ensure last point is close to current price
+    prices[-1] = current_price
+    return prices
+
+
 def generate_signal(market: dict, base_time: datetime, offset_hours: int) -> dict:
     market_odds = market["yes_odds"]
 
@@ -143,6 +156,7 @@ def generate_signal(market: dict, base_time: datetime, offset_hours: int) -> dic
         "signal": signal,
         "score": score,
         "kelly_fraction": round(kelly, 4),
+        "sparkline": _generate_sparkline(market_odds, 20),
         "polymarket_url": f"https://polymarket.com/event/{market.get('slug', '')}",
         "reasoning": random.choice(reasonings),
         "key_factors": random.sample(factors_pool, random.randint(3, 5)),

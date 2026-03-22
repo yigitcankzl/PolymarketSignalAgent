@@ -18,6 +18,7 @@ interface Signal {
   key_factors: string[];
   news_count: number;
   kelly_fraction?: number;
+  sparkline?: number[];
   polymarket_url?: string;
   ensemble?: {
     models_used: number;
@@ -115,6 +116,27 @@ function SignalDetail({ signal }: { signal: Signal }) {
   );
 }
 
+function Sparkline({ data, width = 60, height = 20 }: { data: number[]; width?: number; height?: number }) {
+  if (!data || data.length < 2) return null;
+  const min = Math.min(...data);
+  const max = Math.max(...data);
+  const range = max - min || 1;
+  const points = data
+    .map((v, i) => `${(i / (data.length - 1)) * width},${height - ((v - min) / range) * height}`)
+    .join(" ");
+  const isUp = data[data.length - 1] >= data[0];
+  return (
+    <svg width={width} height={height} className="inline-block">
+      <polyline
+        fill="none"
+        stroke={isUp ? "#22c55e" : "#ef4444"}
+        strokeWidth="1.5"
+        points={points}
+      />
+    </svg>
+  );
+}
+
 export function SignalTable({ signals }: SignalTableProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
@@ -135,14 +157,46 @@ export function SignalTable({ signals }: SignalTableProps) {
     >
       <div className="px-5 py-4 border-b border-zinc-800">
         <h2 className="text-sm font-semibold text-white">Active Signals</h2>
-        <p className="text-xs text-zinc-500 mt-1">Click any row to expand AI reasoning and ensemble details</p>
+        <p className="text-xs text-zinc-500 mt-1">Tap any signal to expand AI reasoning and ensemble details</p>
       </div>
-      <div className="overflow-x-auto">
+
+      {/* Mobile card layout */}
+      <div className="md:hidden divide-y divide-zinc-800/50">
+        {signals.map((s) => (
+          <div
+            key={`mobile-${s.market_id}`}
+            onClick={() => setExpandedId(expandedId === s.market_id ? null : s.market_id)}
+            className="px-4 py-3 cursor-pointer hover:bg-zinc-800/20 transition-colors"
+          >
+            <div className="flex items-start justify-between gap-2 mb-2">
+              <p className="text-xs text-zinc-200 leading-relaxed flex-1">{s.question}</p>
+              <span className={cn("text-[10px] font-medium px-2 py-0.5 rounded-full border shrink-0", getSignalBg(s.signal))}>
+                {s.signal}
+              </span>
+            </div>
+            <div className="flex items-center gap-3 text-[10px] text-zinc-500">
+              <span>Odds: {formatPercent(s.market_odds)}</span>
+              <span>LLM: {formatPercent(s.llm_probability)}</span>
+              <span className={s.edge > 0 ? "text-green-400" : "text-red-400"}>
+                Edge: {s.edge > 0 ? "+" : ""}{formatPercent(s.edge)}
+              </span>
+              <span>Score: {s.score.toFixed(3)}</span>
+            </div>
+            <AnimatePresence>
+              {expandedId === s.market_id && <SignalDetail signal={s} />}
+            </AnimatePresence>
+          </div>
+        ))}
+      </div>
+
+      {/* Desktop table layout */}
+      <div className="hidden md:block overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-zinc-800 text-zinc-500 text-xs uppercase tracking-wider">
               <th className="w-8 px-2 py-3" />
               <th className="text-left px-3 py-3 font-medium">Market</th>
+              <th className="text-center px-3 py-3 font-medium hidden md:table-cell">Trend</th>
               <th className="text-right px-3 py-3 font-medium">Odds</th>
               <th className="text-right px-3 py-3 font-medium">LLM</th>
               <th className="text-right px-3 py-3 font-medium">Edge</th>
@@ -183,6 +237,9 @@ export function SignalTable({ signals }: SignalTableProps) {
                       )}
                     </div>
                   </td>
+                  <td className="text-center px-3 py-3 hidden md:table-cell">
+                    {s.sparkline && <Sparkline data={s.sparkline} />}
+                  </td>
                   <td className="text-right px-3 py-3 text-zinc-300 font-mono text-xs">
                     {formatPercent(s.market_odds)}
                   </td>
@@ -217,7 +274,7 @@ export function SignalTable({ signals }: SignalTableProps) {
                 <AnimatePresence>
                   {expandedId === s.market_id && (
                     <tr>
-                      <td colSpan={9}>
+                      <td colSpan={10}>
                         <SignalDetail signal={s} />
                       </td>
                     </tr>
