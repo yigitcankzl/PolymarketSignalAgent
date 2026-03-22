@@ -123,8 +123,14 @@ def detect_cross_platform_arb(
     opportunities = []
 
     for pm in polymarket_markets:
+        pm_question = pm.get("question", pm.get("title", ""))
+        if not pm_question:
+            continue
         for km in kalshi_markets:
-            similarity = _question_similarity(pm["question"], km["question"])
+            km_question = km.get("question", km.get("title", km.get("subtitle", "")))
+            if not km_question:
+                continue
+            similarity = _question_similarity(pm_question, km_question)
             if similarity < similarity_threshold:
                 continue
 
@@ -156,13 +162,13 @@ def detect_cross_platform_arb(
                 "type": "cross_platform",
                 "polymarket": {
                     "id": pm.get("id", ""),
-                    "question": pm["question"],
+                    "question": pm_question,
                     "yes_price": round(pm_price, 4),
                     "slug": slug,
                 },
                 "kalshi": {
                     "id": km.get("id", ""),
-                    "question": km["question"],
+                    "question": km_question,
                     "yes_price": round(km_price, 4),
                     "event_ticker": km.get("event_ticker", ""),
                 },

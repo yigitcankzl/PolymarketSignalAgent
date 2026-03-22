@@ -33,13 +33,35 @@ def _fetch_markets_synthesis(max_markets: int) -> tuple[list[dict], list[dict]]:
         # Normalize to our internal format
         markets = []
         for m in pm_markets:
+            # Extract ID - try multiple field names
+            market_id = (
+                m.get("id") or m.get("condition_id") or
+                m.get("market_id") or m.get("slug") or ""
+            )
+            if not market_id:
+                continue
+
+            # Extract yes price from various response formats
+            yes_price = 0.5
+            if "yes_price" in m:
+                yes_price = float(m["yes_price"])
+            elif "outcomePrices" in m:
+                op = m["outcomePrices"]
+                if isinstance(op, str):
+                    import json as _json
+                    op = _json.loads(op)
+                if isinstance(op, list) and op:
+                    yes_price = float(op[0])
+            elif "price" in m:
+                yes_price = float(m["price"])
+
             markets.append({
-                "id": m.get("id", m.get("condition_id", "")),
+                "id": market_id,
                 "question": m.get("question", m.get("title", "")),
                 "description": m.get("description", ""),
                 "slug": m.get("slug", ""),
-                "yes_odds": float(m.get("yes_price", m.get("outcomePrices", [0.5])[0] if isinstance(m.get("outcomePrices"), list) else 0.5)),
-                "no_odds": float(m.get("no_price", 0.5)),
+                "yes_odds": yes_price,
+                "no_odds": round(1 - yes_price, 4),
                 "outcomes": m.get("outcomes", ["Yes", "No"]),
                 "volume": float(m.get("volume", 0) or 0),
                 "liquidity": float(m.get("liquidity", 0) or 0),
@@ -54,21 +76,6 @@ def _fetch_markets_synthesis(max_markets: int) -> tuple[list[dict], list[dict]]:
 
         # Also fetch Kalshi for cross-platform arb
         kalshi_markets = client.get_kalshi_markets(limit=max_markets)
-
-        # Fetch news via Synthesis for each market
-        for market in markets[:5]:  # Top 5 for Synthesis news
-            mid = market["id"]
-            try:
-                news = client.get_market_news(mid)
-                if news:
-                    logger.info(f"  Synthesis news: {len(news)} articles for {market['question'][:40]}")
-            except Exception:
-                pass
-
-        # Run cross-platform arbitrage detection
-        arb_opps = client.detect_arbitrage(min_price_diff=0.03)
-        if arb_opps:
-            print(f"  Synthesis arbitrage: {len(arb_opps)} cross-platform opportunities found")
 
         client.save_snapshot(markets)
 
