@@ -6,12 +6,14 @@ import sys
 import time
 from datetime import datetime, timezone
 
-from engine.config import MAX_MARKETS, NEWS_HOURS_BACK, GROQ_API_KEY
+from engine.config import MAX_MARKETS, GROQ_API_KEY, SYNTHESIS_API_KEY
 from engine.polymarket_client import PolymarketClient
+from engine.synthesis_client import SynthesisClient
 from engine.news_fetcher import fetch_news_for_market
 from engine.llm_analyzer import LLMAnalyzer
 from engine.signal_generator import generate_all_signals, export_signals, print_signal_summary
 from engine.backtester import run_backtest, export_results, print_backtest_summary
+from engine.arbitrage import scan_all_arbitrage
 from engine.data_store import load_latest_signals, get_resolved_markets, load_latest_markets
 
 logging.basicConfig(
@@ -22,6 +24,65 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def _fetch_markets_synthesis(max_markets: int) -> tuple[list[dict], list[dict]]:
+    """Fetch markets via Synthesis API (unified Polymarket + Kalshi)."""
+    with SynthesisClient() as client:
+        # Get Polymarket markets
+        pm_markets = client.get_polymarket_markets(limit=max_markets)
+
+        # Normalize to our internal format
+        markets = []
+        for m in pm_markets:
+            markets.append({
+                "id": m.get("id", m.get("condition_id", "")),
+                "question": m.get("question", m.get("title", "")),
+                "description": m.get("description", ""),
+                "slug": m.get("slug", ""),
+                "yes_odds": float(m.get("yes_price", m.get("outcomePrices", [0.5])[0] if isinstance(m.get("outcomePrices"), list) else 0.5)),
+                "no_odds": float(m.get("no_price", 0.5)),
+                "outcomes": m.get("outcomes", ["Yes", "No"]),
+                "volume": float(m.get("volume", 0) or 0),
+                "liquidity": float(m.get("liquidity", 0) or 0),
+                "end_date": m.get("end_date", m.get("endDate", "")),
+                "active": True,
+                "closed": False,
+                "resolved": m.get("resolved", False),
+                "resolution": m.get("resolution", None),
+                "venue": "polymarket",
+                "synthesis_url": f"https://synthesis.trade/market/{m.get('slug', '')}",
+            })
+
+        # Also fetch Kalshi for cross-platform arb
+        kalshi_markets = client.get_kalshi_markets(limit=max_markets)
+
+        # Fetch news via Synthesis for each market
+        for market in markets[:5]:  # Top 5 for Synthesis news
+            mid = market["id"]
+            try:
+                news = client.get_market_news(mid)
+                if news:
+                    logger.info(f"  Synthesis news: {len(news)} articles for {market['question'][:40]}")
+            except Exception:
+                pass
+
+        # Run cross-platform arbitrage detection
+        arb_opps = client.detect_arbitrage(min_price_diff=0.03)
+        if arb_opps:
+            print(f"  Synthesis arbitrage: {len(arb_opps)} cross-platform opportunities found")
+
+        client.save_snapshot(markets)
+
+    return markets, kalshi_markets
+
+
+def _fetch_markets_direct(max_markets: int) -> tuple[list[dict], list[dict]]:
+    """Fetch markets directly from Polymarket API (fallback)."""
+    with PolymarketClient() as client:
+        markets = client.get_active_markets(limit=max_markets)
+        client.save_snapshot(markets)
+    return markets, []
+
+
 def run_pipeline(
     max_markets: int = MAX_MARKETS,
     run_backtest_flag: bool = False,
@@ -30,32 +91,33 @@ def run_pipeline(
 ) -> dict:
     """Execute the full signal generation pipeline.
 
-    Steps:
-    1. Fetch active markets from Polymarket
-    2. Gather news for each market
-    3. Analyze with LLM for probability estimates
-    4. Calculate edge and generate signals
-    5. Export results
-    6. Optionally run backtest
+    Uses Synthesis API if SYNTHESIS_API_KEY is set,
+    otherwise falls back to direct Polymarket API.
     """
     start_time = time.time()
+    use_synthesis = bool(SYNTHESIS_API_KEY)
+
     print("\n=== Polymarket Signal Agent ===")
+    if use_synthesis:
+        print(">>> Powered by Synthesis.trade API <<<")
     print(f"Started at {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}")
     print(f"Max markets: {max_markets}\n")
 
     # Step 1: Fetch markets
-    print("[1/5] Fetching active markets from Polymarket...")
-    with PolymarketClient() as client:
-        markets = client.get_active_markets(limit=max_markets)
-        if not markets:
-            print("No active markets found. Exiting.")
-            return {"signals": [], "metrics": None}
+    if use_synthesis:
+        print("[1/6] Fetching markets via Synthesis API (Polymarket + Kalshi)...")
+        markets, kalshi_markets = _fetch_markets_synthesis(max_markets)
+    else:
+        print("[1/6] Fetching active markets from Polymarket...")
+        markets, kalshi_markets = _fetch_markets_direct(max_markets)
 
-        print(f"  Found {len(markets)} markets\n")
-        client.save_snapshot(markets)
+    if not markets:
+        print("No active markets found. Exiting.")
+        return {"signals": [], "metrics": None}
+    print(f"  Found {len(markets)} markets\n")
 
     # Step 2: Fetch news
-    print("[2/5] Gathering news for each market...")
+    print("[2/6] Gathering news for each market...")
     news_map: dict[str, list[dict]] = {}
     for i, market in enumerate(markets, 1):
         sys.stdout.write(f"\r  Fetching news: {i}/{len(markets)}")
@@ -66,9 +128,7 @@ def run_pipeline(
 
     # Step 3: LLM analysis
     if not GROQ_API_KEY:
-        print("[3/5] WARNING: No GROQ_API_KEY set. Skipping LLM analysis.")
-        print("  Set GROQ_API_KEY in .env to enable AI-powered probability estimation.")
-        # Generate dummy analyses
+        print("[3/6] WARNING: No GROQ_API_KEY set. Skipping LLM analysis.")
         analyses = [
             {
                 "market_id": m["id"],
@@ -82,29 +142,33 @@ def run_pipeline(
             for m in markets
         ]
     else:
-        print("[3/5] Running LLM analysis...")
+        print("[3/6] Running LLM ensemble analysis...")
         analyzer = LLMAnalyzer()
         analyses = analyzer.batch_analyze(markets, news_map)
     print(f"  Analyzed {len(analyses)} markets\n")
 
     # Step 4: Generate signals
-    print("[4/5] Generating signals...")
+    print("[4/6] Generating signals with Kelly sizing...")
     news_counts = {mid: len(articles) for mid, articles in news_map.items()}
     slugs = {m["id"]: m.get("slug", "") for m in markets}
     signals = generate_all_signals(analyses, news_counts, slugs=slugs)
     print(f"  Generated {len(signals)} signals\n")
 
-    # Step 5: Export
+    # Step 5: Cross-platform arbitrage scan
+    print("[5/6] Scanning for arbitrage opportunities...")
+    arb_result = scan_all_arbitrage(markets, kalshi_markets if kalshi_markets else None)
+    print(f"  Found {arb_result['total_opportunities']} arbitrage opportunities\n")
+
+    # Step 6: Export
     result = {"signals": signals, "metrics": None}
 
     if export:
-        print("[5/5] Exporting results...")
+        print("[6/6] Exporting results...")
         filepath = export_signals(signals)
         print(f"  Signals exported to {filepath}\n")
     else:
-        print("[5/5] Skipping export\n")
+        print("[6/6] Skipping export\n")
 
-    # Print summary
     print_signal_summary(signals)
 
     # Backtest
@@ -136,7 +200,6 @@ def run_backtest_from_history(current_signals: list[dict]) -> dict | None:
     resolutions = get_resolved_markets(markets_data)
     if not resolutions:
         print("  No resolved markets found. Loading seed data if available...")
-        # Try loading from backtest/latest.json (seed data)
         from engine.data_store import load_latest_backtest
         existing = load_latest_backtest()
         if existing:

@@ -14,7 +14,11 @@ SIGNALS_DIR = DATA_DIR / "signals"
 NEWS_DIR = DATA_DIR / "news"
 BACKTEST_DIR = DATA_DIR / "backtest"
 
-# Polymarket API
+# Synthesis API (unified Polymarket + Kalshi)
+SYNTHESIS_API_KEY = os.getenv("SYNTHESIS_API_KEY", "")
+SYNTHESIS_BASE_URL = "https://synthesis.trade"
+
+# Polymarket API (fallback if Synthesis unavailable)
 POLYMARKET_API_URL = os.getenv("POLYMARKET_API_URL", "https://gamma-api.polymarket.com")
 
 # Groq LLM
