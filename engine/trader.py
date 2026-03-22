@@ -98,30 +98,37 @@ class Trader:
             self.setup_api_key()
 
         try:
-            headers = {"X-API-KEY": self.account_api_key}
             import httpx
-            resp = httpx.get(
-                f"{self.client.base_url}/api/v1/wallets",
+            headers = {
+                "X-API-KEY": self.account_api_key,
+                "Content-Type": "application/json",
+            }
+
+            # Try creating a Polygon wallet directly
+            resp = httpx.post(
+                f"{self.client.base_url}/api/v1/wallet/pol",
                 headers=headers,
                 timeout=15.0,
             )
-            resp.raise_for_status()
-            data = resp.json()
-            response = data.get("response", data)
 
-            wallets = response if isinstance(response, list) else response.get("wallets", [])
-            if wallets:
-                self.wallet_id = wallets[0].get("wallet_id", wallets[0].get("id", ""))
-            else:
-                # Create new wallet
-                resp = httpx.post(
+            if resp.status_code == 409:
+                # Wallet already exists, fetch it
+                resp = httpx.get(
                     f"{self.client.base_url}/api/v1/wallet/pol",
                     headers=headers,
                     timeout=15.0,
                 )
                 resp.raise_for_status()
-                data = resp.json()
-                response = data.get("response", data)
+
+            elif resp.status_code >= 400:
+                resp.raise_for_status()
+
+            data = resp.json()
+            response = data.get("response", data)
+
+            if isinstance(response, list) and response:
+                self.wallet_id = response[0].get("wallet_id", response[0].get("id", ""))
+            elif isinstance(response, dict):
                 self.wallet_id = response.get("wallet_id", response.get("id", ""))
 
             logger.info(f"Wallet ready: {self.wallet_id}")
