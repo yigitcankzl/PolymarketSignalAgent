@@ -2,165 +2,207 @@
 
 ## System Overview
 
-The Polymarket Signal Agent is a pipeline-based system that generates trading signals for prediction markets. It follows a sequential data flow pattern where each stage transforms and enriches data before passing it to the next.
+The Polymarket Signal Agent is a 6-step pipeline that ingests prediction market data from Polymarket and Kalshi via the Synthesis.trade unified API, applies multi-LLM analysis with probability calibration, generates trading signals with risk-adjusted sizing, detects cross-platform arbitrage opportunities, and optionally executes trades — all orchestrated from a single CLI command.
+
+Every component uses **live API data** — no mock data in the signal or arbitrage pipeline.
 
 ## Pipeline Flow
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                         SIGNAL PIPELINE                             │
-│                                                                     │
-│  ┌──────────────┐   ┌──────────────┐   ┌──────────────────────┐    │
-│  │  Polymarket   │──→│    News      │──→│     LLM Analyzer     │    │
-│  │   Client      │   │   Fetcher    │   │   (Groq/Llama 3.3)  │    │
-│  │              │   │              │   │                      │    │
-│  │ gamma-api    │   │ Google RSS   │   │ System + User prompt │    │
-│  │ /markets     │   │ NewsData.io  │   │ JSON probability out │    │
-│  └──────┬───────┘   └──────────────┘   └──────────┬───────────┘    │
-│         │                                          │                │
-│         │          ┌──────────────┐                │                │
-│         └─────────→│   Signal     │←───────────────┘                │
-│                    │  Generator   │                                  │
-│                    │              │                                  │
-│                    │ edge = LLM   │                                  │
-│                    │   - market   │                                  │
-│                    └──────┬───────┘                                  │
-│                           │                                         │
-│              ┌────────────┼────────────┐                            │
-│              ▼            ▼            ▼                            │
-│        ┌──────────┐ ┌──────────┐ ┌──────────┐                      │
-│        │  Export   │ │ Backtest │ │ Dashboard│                      │
-│        │  (JSON)  │ │  Engine  │ │ (Next.js)│                      │
-│        └──────────┘ └──────────┘ └──────────┘                      │
-└─────────────────────────────────────────────────────────────────────┘
+Step 1: MARKET FETCH                  Step 2: NEWS GATHERING
+┌──────────────────────────┐          ┌──────────────────────┐
+│  Synthesis.trade API     │          │  Google News RSS     │
+│                          │          │                      │
+│  GET /polymarket/markets │──────────│  Keyword extraction  │
+│  GET /kalshi/markets     │          │  from market question│
+│                          │          │                      │
+│  50 events → flatten     │          │  Dedup + cache       │
+│  Filter 10-90% odds      │          │  48h time window     │
+│  Top N by volume         │          └──────────┬───────────┘
+└──────────┬───────────────┘                     │
+           │                                      │
+           ▼                                      ▼
+Step 3: LLM ENSEMBLE ANALYSIS
+┌─────────────────────────────────────────────────────────┐
+│  3 models queried in parallel via Groq API:             │
+│                                                         │
+│  ┌─────────────────┐ ┌───────────────┐ ┌─────────────┐ │
+│  │ Llama 3.3 70B   │ │ Llama 3.1 8B  │ │ Qwen3 32B   │ │
+│  │ (primary)       │ │ (fast)        │ │ (diverse)    │ │
+│  └────────┬────────┘ └──────┬────────┘ └──────┬──────┘ │
+│           │                 │                  │        │
+│           └─────────────────┼──────────────────┘        │
+│                             │                           │
+│                      Median Probability                 │
+│                             │                           │
+│                   Platt Scaling (α=1.5)                 │
+│                   Calibrated Probability                │
+│                             │                           │
+│  Superforecaster prompt:    │  Output:                  │
+│  1. Base rate analysis      │  - probability (0-1)      │
+│  2. Evidence for/against    │  - confidence (0-1)       │
+│  3. Adjust from base rate   │  - reasoning (CoT)        │
+│  4. Decisive estimation     │  - key_factors            │
+└─────────────────────────────┼───────────────────────────┘
+                              │
+                              ▼
+Step 4: SIGNAL GENERATION
+┌───────────────────────────────────────────────────────────┐
+│  Edge = Calibrated_LLM_Probability − Market_Odds          │
+│                                                           │
+│  ┌─────────────┬───────────────────────────────────────┐  │
+│  │ Edge > +10% │ + Confidence > 50% → STRONG_BUY       │  │
+│  │ Edge > +5%  │ + Confidence > 40% → BUY              │  │
+│  │ Edge < -5%  │ + Confidence > 40% → SELL             │  │
+│  │ Edge < -10% │ + Confidence > 50% → STRONG_SELL      │  │
+│  │ Otherwise   │                    → HOLD             │  │
+│  └─────────────┴───────────────────────────────────────┘  │
+│                                                           │
+│  Score = |edge| × confidence  (for ranking)               │
+│  Kelly = fractional Kelly, quarter-sized, 5% max cap      │
+└───────────────────────────────┬───────────────────────────┘
+                                │
+              ┌─────────────────┼─────────────────┐
+              ▼                 ▼                 ▼
+Step 5: ARBITRAGE SCAN    TRADE EXECUTION    Step 6: EXPORT
+┌──────────────────┐   ┌──────────────────┐ ┌────────────┐
+│ Fetch 664 PM     │   │ Synthesis.trade  │ │ JSON files │
+│ + 709 KA outcomes│   │ Wallet API       │ │ → Dashboard│
+│                  │   │                  │ │            │
+│ Match by outcome │   │ Account setup    │ │ signals/   │
+│ name across      │   │ Wallet creation  │ │ markets/   │
+│ platforms        │   │ Order placement  │ │ arbitrage/ │
+│                  │   │ Position/PnL     │ │ trader/    │
+│ Verify same event│   │ tracking         │ │            │
+│ via title sim    │   │                  │ │ 7 API      │
+│                  │   │ Kelly-sized      │ │ endpoints  │
+│ 8 verified arb   │   │ market orders    │ │            │
+│ opportunities    │   │                  │ │ Auto-      │
+│                  │   │                  │ │ refresh    │
+│ Synthesis.trade  │   │                  │ │ dashboard  │
+│ links            │   │                  │ │            │
+└──────────────────┘   └──────────────────┘ └────────────┘
 ```
 
 ## Module Responsibilities
 
-### 1. Polymarket Client (`polymarket_client.py`)
-- Connects to Polymarket's gamma API (`https://gamma-api.polymarket.com`)
-- Fetches active markets, filters by volume threshold
-- Parses `outcomePrices` JSON string to extract Yes/No odds
-- Saves market snapshots with timestamps for historical tracking
+### Synthesis Client (`synthesis_client.py`)
+**Primary data layer** — all market data flows through Synthesis.trade's unified API:
+- `get_polymarket_markets()` — fetches events with nested sub-markets
+- `get_kalshi_markets()` — same format for Kalshi
+- `search_markets(query, venue)` — cross-platform market search
+- `detect_arbitrage()` — outcome-based cross-platform arbitrage detection
+  - Builds flat outcome maps from both platforms (664 PM + 709 KA)
+  - Matches by outcome name (e.g., "Buffalo Sabres" exists on both)
+  - Verifies events are the same via normalized title similarity
+  - Filters false positives (same team, different competition)
 
-### 2. News Fetcher (`news_fetcher.py`)
-- Extracts search keywords from market questions (stop word removal)
-- Fetches from Google News RSS (primary, unlimited)
-- Optional: NewsData.io API (secondary, rate-limited)
-- Deduplicates articles by title hash
-- Filters by time window (configurable, default 48h)
-- Caches results to avoid redundant API calls
+### Trader (`trader.py`)
+**Automated trading** via Synthesis.trade wallet and order API:
+- `full_setup()` — creates account → API key → wallet in sequence
+- `place_order(token_id, side, amount)` — market/limit/stoploss orders
+- `execute_signals(signals)` — auto-trades top signals with Kelly sizing
+- `get_balance()`, `get_positions()`, `get_pnl()` — live portfolio state
+- Persistent state in `data/trader/state.json` (survives restarts)
 
-### 3. LLM Analyzer (`llm_analyzer.py`)
-- **Multi-LLM Ensemble**: Queries 3 Groq models (Llama 3.3 70B, Llama 3.1 8B, Gemma2 9B)
-- **Superforecaster Prompting**: Tetlock-style methodology with base rate decomposition, evidence weighing, and decisive estimation
-- **Median Aggregation**: Takes median probability across models for robustness
-- **Platt Scaling Calibration**: `P_cal = 1/(1+exp(-alpha*logit(P)))` with alpha=1.5 to fix LLM hedging bias
-- **Confidence Adjustment**: Model disagreement (spread) reduces confidence automatically
-- Returns: probability, confidence, reasoning, key_factors, ensemble metadata
-- Rate limiting: 2.5s between requests (30 RPM Groq limit)
-- Robust JSON parsing with regex fallbacks
-- Graceful fallback to market odds on total failure
+### LLM Analyzer (`llm_analyzer.py`)
+**Multi-model ensemble** with calibration:
+- Queries 3 Groq models: Llama 3.3 70B (primary), Llama 3.1 8B (fast), Qwen3 32B (diverse)
+- Takes **median** probability for robustness
+- **Platt scaling**: `P_cal = 1/(1+exp(-1.5×logit(P)))` — fixes RLHF hedging bias
+- **Superforecaster prompting**: base rate decomposition, evidence weighing, decisive estimation
+- Model disagreement (spread) automatically reduces confidence
+- Robust JSON parsing: direct → code block → regex → fallback
+- `<think>` tag stripping for reasoning models (Qwen)
 
-### 4. Signal Generator (`signal_generator.py`)
-- **Edge Formula**: `edge = calibrated_llm_probability - market_odds`
-- Five-tier classification: STRONG_BUY, BUY, HOLD, SELL, STRONG_SELL
-- **Score**: `abs(edge) * confidence` for ranking
-- **Kelly Criterion**: Fractional Kelly (quarter, 5% cap) position sizing per signal
-- **Polymarket Links**: Direct URL to market page via slug
-- Exports to JSON with `latest.json` for dashboard consumption
+### Signal Generator (`signal_generator.py`)
+- Edge = calibrated LLM probability − market odds
+- Five-tier classification with configurable thresholds
+- **Kelly criterion**: `kelly = (p×b−q)/b × 0.25`, capped at 5% of bankroll
+- Score-based ranking: `|edge| × confidence`
+- Polymarket URL generation via event slug
 
-### 4b. Arbitrage Scanner (`arbitrage.py`)
-- **Intra-market**: Detects when YES + NO best prices < $1.00 (guaranteed profit)
-- **Related-market**: Finds pricing discrepancies between similar questions via keyword overlap
-- Results exported to `data/arbitrage/latest.json`
+### Arbitrage Scanner (`arbitrage.py`)
+Three detection modes:
+1. **Intra-market**: YES + NO < $1.00 (guaranteed profit)
+2. **Related-market**: Similar questions on same platform with price discrepancy
+3. **Cross-platform**: Same outcome on Polymarket vs Kalshi at different prices
+   - Uses Synthesis API to fetch from both platforms
+   - Event title similarity verification to avoid false matches
 
-### 5. Backtester (`backtester.py`)
-- PnL calculation per trade based on signal direction and resolution
-- Comprehensive metrics: hit rate, Sharpe ratio, max drawdown, profit factor
+### News Fetcher (`news_fetcher.py`)
+- Extracts keywords from market questions (stop word removal)
+- Google News RSS (primary, no rate limits)
+- Title-hash deduplication
+- File-based caching (6h TTL) to avoid redundant fetches
+
+### Backtester (`backtester.py`)
+- Per-trade PnL based on signal direction and market resolution
+- Metrics: hit rate, Sharpe ratio, max drawdown, profit factor
 - Per-signal-type win rate breakdown
-- Cumulative PnL curve generation for charting
+- Cumulative PnL curve for charting
 
-### 6. Data Store (`data_store.py`)
-- Simple JSON file-based persistence
-- Convention: each module writes to its `data/` subdirectory
-- `latest.json` files serve as the API contract with the dashboard
-
-## Data Flow: Engine → Dashboard
-
-The dashboard reads from the engine's output files. No database or message queue is needed.
+## Data Flow
 
 ```
-Engine writes:                    Dashboard reads:
-data/signals/latest.json    ←──  /api/signals (GET)
-data/markets/latest.json    ←──  /api/markets (GET)
-data/backtest/latest.json   ←──  /api/backtest (GET)
-data/arbitrage/latest.json  ←──  /api/arbitrage (GET)
+Live APIs                          Engine                    Dashboard
+─────────                          ──────                    ─────────
+Synthesis.trade ──→ markets ──→ data/markets/latest.json ──→ /api/markets
+                               data/signals/latest.json ──→ /api/signals
+Groq API ──→ LLM analysis ──→ (embedded in signals)
+                               data/arbitrage/latest.json──→ /api/arbitrage
+Google RSS ──→ news ──→ data/news/ (cached)
+                               data/trader/latest.json ──→ /api/trading
+Synthesis Wallet ──→ balance ──→ (embedded in trader data)
+                               data/backtest/latest.json──→ /api/backtest
 ```
 
-API routes are simple `fs.readFile` operations that return JSON. The dashboard auto-refreshes every 30 seconds with a countdown timer and toast notifications for new signals.
+Dashboard auto-refreshes every 30 seconds. Toast notifications alert on new signals.
 
 ## Design Decisions
 
-### Why Groq with 3-model ensemble?
-- Free tier with generous limits (30 RPM, 14400 RPD)
-- 3 diverse models (70B, 8B, 9B) provide ensemble diversity at zero cost
-- Median aggregation is robust to individual model errors
-- Research shows LLM ensembles match human forecaster accuracy (Science Advances, 2024)
-- OpenAI-compatible API means easy migration to other providers
+### Why Synthesis.trade?
+- **Single API** for both Polymarket (Polygon) and Kalshi (Solana) — no need to manage two integrations
+- **Cross-platform arbitrage** becomes trivial when both datasets come from one source
+- **Trading execution** through the same API that provides market data
+- **Wallet abstraction** — handles cross-chain deposits, bridging, and settlement
 
-### Why JSON files instead of a database?
-- Zero infrastructure overhead
-- Human-readable output for debugging
-- Easy to version control sample data
-- Dashboard can read directly without an ORM layer
-- Sufficient for a pipeline that runs hourly/daily
+### Why 3-model ensemble?
+- Diversity reduces individual model bias (70B + 8B + 32B, three architectures)
+- Median aggregation is robust to one model being wrong
+- Free tier across all models (Groq)
+- Research: LLM ensembles match human forecaster accuracy (*Science Advances*, 2024)
 
-### Why server-side data fetching in API routes?
-- Data files live on the same machine as the dashboard
-- No CORS issues
-- Clean separation: engine writes, dashboard reads
-- Easy to extend with caching headers later
+### Why Platt scaling?
+- LLMs trained with RLHF systematically hedge toward 0.5
+- Platt scaling with α=1.5 pushes 0.6→0.65, 0.7→0.78, 0.8→0.87
+- More decisive probabilities produce larger, more profitable edges
+- Calibration is the single highest-impact improvement per research (AIA Forecaster, 2025)
 
-### Why Recharts over Plotly/D3?
-- Native React integration
-- Works seamlessly with shadcn/ui patterns
-- Lightweight bundle size
-- Sufficient for the chart types needed (area, bar)
-
-## Edge Calculation Theory
-
-The system's core hypothesis: **LLM ensembles with calibrated probabilities can detect information edges in prediction markets by synthesizing recent news faster than the market can price it in.**
-
-```
-Raw Probability = median(Model1, Model2, Model3)
-Calibrated P    = 1 / (1 + exp(-1.5 * logit(Raw P)))     # Platt scaling
-Edge            = Calibrated P - Market Odds
-Kelly Size      = (edge * confidence) / odds * 0.25       # Quarter Kelly, capped at 5%
-```
-
-The calibration step is critical: LLMs trained with RLHF tend to hedge toward 0.5. Platt scaling with alpha=1.5 pushes a hedged 0.6 → 0.65 and 0.7 → 0.78, producing more decisive and profitable signals.
-
-The system is most valuable when:
-1. News breaks that hasn't been reflected in market prices yet
-2. Multiple models agree on direction (low ensemble spread)
-3. The confidence is high enough to filter noise from signal
-4. Kelly sizing prevents overexposure to any single market
+### Why Kelly criterion?
+- Optimal position sizing given estimated edge and confidence
+- Quarter Kelly (0.25×) provides safety margin for estimation errors
+- 5% cap prevents catastrophic loss on any single market
+- Naturally sizes up on high-confidence, high-edge signals
 
 ## Rate Limits & Performance
 
 | Component | Limit | Mitigation |
 |-----------|-------|------------|
-| Groq API | 30 RPM | 2.5s sleep between requests |
+| Synthesis.trade | Generous | Primary data source |
+| Groq API | 100K TPD (free) | 2.5s sleep, model fallback |
 | Google RSS | None | Primary news source |
-| NewsData.io | 200/day | Secondary, optional |
-| Polymarket | None (public) | Basic httpx timeouts |
 
-For 30 markets with ensemble enabled, the full pipeline takes approximately:
-- Market fetch: ~2s
-- News fetch: ~30s (parallel-capable, currently sequential)
-- LLM ensemble analysis: ~225s (30 markets * 3 models * 2.5s rate limit)
-- Signal generation + arbitrage scan: <1s
-- **Total: ~4.5 minutes**
+Pipeline runtime for 10 markets: ~110 seconds (with rate limiting).
 
-With ensemble disabled (`ENSEMBLE_ENABLED=false`), runtime drops to ~2 minutes.
+## What's Real vs Simulated
+
+| Component | Status | Source |
+|-----------|--------|--------|
+| Market prices | **Live** | Synthesis.trade API |
+| News articles | **Live** | Google News RSS |
+| LLM analysis | **Live** | Groq API (3-model ensemble) |
+| Signal generation | **Live** | Computed from live data |
+| Cross-platform arbitrage | **Live** | Synthesis API (664+709 outcomes) |
+| Trading account + wallet | **Live** | Synthesis API |
+| Backtest metrics | **Simulated** | Seed data (no resolved markets yet) |
