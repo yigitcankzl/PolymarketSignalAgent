@@ -11,6 +11,7 @@ import { BacktestPanel } from "@/components/backtest-panel";
 import { SignalBreakdown } from "@/components/signal-breakdown";
 import { TopSignals } from "@/components/top-signals";
 import { ArbitragePanel } from "@/components/arbitrage-panel";
+import { TradingPanel } from "@/components/trading-panel";
 import { DashboardSkeleton } from "@/components/skeleton";
 
 interface SignalEntry {
@@ -191,6 +192,7 @@ export default function Dashboard() {
           </div>
 
           <div className="space-y-6">
+            <TradingPanel />
             <BacktestPanel metrics={backtest?.metrics || null} />
             <ArbitragePanel
               crossPlatform={arbitrage?.cross_platform || []}

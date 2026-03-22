@@ -123,6 +123,7 @@ def _fetch_markets_direct(max_markets: int) -> tuple[list[dict], list[dict]]:
 def run_pipeline(
     max_markets: int = MAX_MARKETS,
     run_backtest_flag: bool = False,
+    trade_flag: bool = False,
     export: bool = True,
     use_cache: bool = True,
 ) -> dict:
@@ -218,6 +219,32 @@ def run_pipeline(
 
     print_signal_summary(signals)
 
+    # Trading execution
+    if trade_flag and use_synthesis:
+        print("\n--- Trading Execution ---")
+        from engine.trader import Trader
+        with Trader() as trader:
+            # Setup account/wallet if needed
+            trader.full_setup()
+
+            # Check balance
+            balance = trader.get_balance()
+            print(f"  Wallet balance: {balance}")
+
+            # Execute top signals
+            print(f"  Executing top {min(3, len(signals))} signals...")
+            trade_results = trader.execute_signals(signals, max_orders=3, max_amount_per_order=2.0)
+            for tr in trade_results:
+                status = "OK" if "error" not in tr["result"] else tr["result"].get("error", "")[:50]
+                print(f"    {tr['side']} ${tr['amount']} {tr['question'][:40]}... → {status}")
+
+            # Export trading data for dashboard
+            trader.export_dashboard_data()
+            print(f"  Positions: {len(trader.get_positions())}")
+            print(f"  Trading data exported")
+    elif trade_flag and not use_synthesis:
+        print("\n--- Trading requires SYNTHESIS_API_KEY ---")
+
     # Backtest
     if run_backtest_flag:
         print("\n--- Running Backtest ---")
@@ -278,6 +305,10 @@ def main():
         help="Disable news caching (re-fetch all)"
     )
     parser.add_argument(
+        "--trade", action="store_true",
+        help="Execute top signals as real orders via Synthesis"
+    )
+    parser.add_argument(
         "--verbose", "-v", action="store_true",
         help="Enable verbose logging"
     )
@@ -290,6 +321,7 @@ def main():
     run_pipeline(
         max_markets=args.markets,
         run_backtest_flag=args.backtest,
+        trade_flag=args.trade,
         export=not args.no_export,
         use_cache=not args.no_cache,
     )
