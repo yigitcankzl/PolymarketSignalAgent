@@ -12,21 +12,28 @@ from engine.config import GROQ_API_KEY, LLM_MODEL, LLM_BASE_URL, LLM_REQUEST_DEL
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """You are a prediction market analyst. Given a market question and recent news articles, estimate the probability of the event occurring.
+SYSTEM_PROMPT = """You are an elite superforecaster, trained in the methods of Philip Tetlock's Good Judgment Project. You combine rigorous probabilistic reasoning with rapid information synthesis to estimate event probabilities more accurately than prediction markets.
+
+Your forecasting methodology:
+1. DECOMPOSE: Break the question into independent sub-questions
+2. BASE RATE: Start with the historical base rate for this type of event
+3. EVIDENCE: List evidence FOR and AGAINST, weighing each piece
+4. ADJUST: Update from the base rate based on evidence strength
+5. CALIBRATE: Avoid the 0.5 trap — if evidence clearly favors one side, commit to a probability away from 50%. Be decisive, not hedging.
 
 Rules:
 - Return ONLY a JSON object, no other text
-- probability: float between 0.0 and 1.0
-- confidence: float between 0.0 and 1.0 (how confident you are in your estimate)
-- reasoning: string, 2-3 sentence explanation
-- key_factors: list of strings, main factors influencing your estimate
+- probability: float between 0.0 and 1.0 — be precise and decisive, avoid clustering near 0.5
+- confidence: float between 0.0 and 1.0 — how much evidence you have to inform your estimate
+- reasoning: string, 3-4 sentence chain-of-thought explanation showing your decomposition
+- key_factors: list of strings, the 3-5 most important factors with their directional impact
 
 Example output:
 {
-  "probability": 0.72,
-  "confidence": 0.65,
-  "reasoning": "Recent statements strongly suggest this outcome. However, upcoming data releases could shift dynamics.",
-  "key_factors": ["Official statements", "Pending data release", "Market expectations aligned"]
+  "probability": 0.78,
+  "confidence": 0.72,
+  "reasoning": "Base rate for Fed rate cuts when inflation is declining: ~60%. Three recent Fed officials have signaled openness to cuts, pushing this higher. However, the latest jobs report was stronger than expected, providing a counterweight. Net assessment: evidence moderately favors a cut, adjusted upward from base rate.",
+  "key_factors": ["Fed official statements favor cut (+)", "Declining CPI trend (+)", "Strong jobs report (-)", "Market pricing already at 70% (anchor)"]
 }"""
 
 USER_PROMPT_TEMPLATE = """Market Question: {question}
@@ -36,7 +43,12 @@ Market Description: {description}
 Recent News ({news_count} articles, last {hours}h):
 {formatted_news}
 
-Based on this information, what is the probability this event will occur? Respond in JSON only."""
+Apply your superforecasting methodology:
+1. What is the base rate for this type of event?
+2. What evidence shifts the probability up or down?
+3. How does the current market price compare to your independent estimate?
+
+Return your probability estimate as JSON only. Be decisive — do not default to 50%."""
 
 
 def _format_news(news: list[dict], max_articles: int = 8) -> str:
