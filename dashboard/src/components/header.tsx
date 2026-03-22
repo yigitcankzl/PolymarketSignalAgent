@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Activity, BarChart3, TrendingUp, RefreshCw } from "lucide-react";
+import { Activity, BarChart3, TrendingUp, RefreshCw, Play } from "lucide-react";
+import { toast } from "sonner";
 
 interface HeaderProps {
   marketCount: number;
@@ -13,6 +14,7 @@ interface HeaderProps {
 export function Header({ marketCount, lastRun, onRefresh, refreshInterval }: HeaderProps) {
   const [countdown, setCountdown] = useState(refreshInterval);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isRunning, setIsRunning] = useState(false);
 
   const handleRefresh = useCallback(async () => {
     setIsRefreshing(true);
@@ -20,6 +22,28 @@ export function Header({ marketCount, lastRun, onRefresh, refreshInterval }: Hea
     setIsRefreshing(false);
     setCountdown(refreshInterval);
   }, [onRefresh, refreshInterval]);
+
+  const handleRunPipeline = async () => {
+    if (isRunning) return;
+    setIsRunning(true);
+    toast.info("Pipeline started — fetching markets, analyzing with AI...", { duration: 5000 });
+
+    try {
+      const resp = await fetch("/api/run-pipeline", { method: "POST" });
+      const data = await resp.json();
+
+      if (data.success) {
+        toast.success(`Pipeline complete: ${data.signals} signals, ${data.arbitrage} arbitrage`, { duration: 5000 });
+        await onRefresh();
+      } else {
+        toast.error("Pipeline failed — check terminal for details");
+      }
+    } catch {
+      toast.error("Pipeline request failed");
+    } finally {
+      setIsRunning(false);
+    }
+  };
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -51,7 +75,7 @@ export function Header({ marketCount, lastRun, onRefresh, refreshInterval }: Hea
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-5 text-sm">
+        <div className="flex items-center gap-3 text-sm">
           <div className="flex items-center gap-2 text-zinc-400">
             <BarChart3 className="w-4 h-4" />
             <span>{marketCount} markets</span>
@@ -67,6 +91,14 @@ export function Header({ marketCount, lastRun, onRefresh, refreshInterval }: Hea
             <Activity className="w-3.5 h-3.5" />
             <span>{lastRun || "—"}</span>
           </div>
+          <button
+            onClick={handleRunPipeline}
+            disabled={isRunning}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-600 hover:bg-green-500 disabled:bg-zinc-700 text-white disabled:text-zinc-500 transition-all text-xs font-medium"
+          >
+            <Play className={`w-3.5 h-3.5 ${isRunning ? "animate-pulse" : ""}`} />
+            <span>{isRunning ? "Running..." : "Run Pipeline"}</span>
+          </button>
           <button
             onClick={handleRefresh}
             className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white transition-all text-xs"
