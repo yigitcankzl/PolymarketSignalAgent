@@ -1,6 +1,6 @@
 # Polymarket Signal Agent
 
-AI-powered signal system that analyzes Polymarket prediction markets, evaluates news sources with LLM (Groq - Llama 3.3 70B), and generates trading signals by detecting edge between AI probability estimates and market odds.
+AI-powered signal system that analyzes Polymarket prediction markets using a multi-LLM ensemble (Groq), applies superforecaster methodology with probability calibration, and generates trading signals by detecting edge between AI estimates and market odds.
 
 **Track:** AI-Augmented Systems
 
@@ -10,25 +10,33 @@ Prediction markets aggregate crowd wisdom into prices, but information asymmetry
 
 1. **Fetches** active markets from Polymarket's CLOB API
 2. **Gathers** relevant news from Google News RSS and other sources
-3. **Analyzes** each market with an LLM to estimate event probability
-4. **Calculates edge** (LLM estimate vs market odds) and generates signals
-5. **Backtests** signal accuracy against resolved markets
-6. **Visualizes** everything in a real-time dashboard
+3. **Analyzes** each market with a 3-model LLM ensemble using superforecaster prompting
+4. **Calibrates** probabilities using Platt scaling to fix LLM hedging bias
+5. **Calculates edge** and generates signals with Kelly criterion position sizing
+6. **Detects arbitrage** opportunities across markets
+7. **Backtests** signal accuracy against resolved markets
+8. **Visualizes** everything in a real-time animated dashboard
 
 ## How It Works
 
 ```
-Polymarket API ──→ Active Markets ──→ News Fetcher ──→ LLM Analyzer ──→ Signal Generator
-                                         │                  │                  │
-                                    Google RSS        Groq (Llama 3.3)    Edge Calculation
-                                    NewsData.io       70B Versatile       STRONG_BUY/SELL
-                                         │                  │                  │
-                                         └──────────────────┴──────────────────┘
-                                                          │
-                                                    ┌─────┴─────┐
-                                                    │ Backtester │
-                                                    │ Dashboard  │
-                                                    └───────────┘
+Polymarket API ──→ Active Markets ──→ News Fetcher ──→ LLM Ensemble ──→ Calibration
+                                         │              │                    │
+                                    Google RSS      3 Models:           Platt Scaling
+                                    NewsData.io     Llama 3.3 70B       Extremization
+                                         │          Llama 3.1 8B             │
+                                         │          Gemma2 9B                │
+                                         └──────────────┴────────────────────┘
+                                                        │
+                                         ┌──────────────┼──────────────┐
+                                         ▼              ▼              ▼
+                                   Signal Gen     Arbitrage       Backtester
+                                   + Kelly        Scanner         + Metrics
+                                         │              │              │
+                                         └──────────────┴──────────────┘
+                                                        │
+                                                   Dashboard
+                                              (Next.js + Recharts)
 ```
 
 ### Signal Classification
@@ -41,6 +49,26 @@ Polymarket API ──→ Active Markets ──→ News Fetcher ──→ LLM Ana
 | **SELL** | Edge < -5% and Confidence > 40% |
 | **STRONG_SELL** | Edge < -10% and Confidence > 50% |
 
+## Key Features
+
+### Engine
+- **Multi-LLM Ensemble** - 3 Groq models with median aggregation for robust estimates
+- **Superforecaster Prompting** - Tetlock-style chain-of-thought with base rate decomposition
+- **Probability Calibration** - Platt scaling pushes hedged 50/50 estimates toward decisive probabilities
+- **Kelly Criterion Sizing** - Fractional Kelly (quarter, 5% cap) per signal
+- **Arbitrage Detection** - Intra-market (YES+NO < $1) and related-market mispricing scanner
+- **News Caching** - Dedup + cache to avoid redundant API calls
+
+### Dashboard
+- **Live Auto-Refresh** - 30s polling with countdown, pulsing green indicator
+- **Animated UI** - Framer Motion mount animations, staggered cards, number counters
+- **Expandable AI Reasoning** - Click any signal to see full chain-of-thought + ensemble breakdown
+- **SVG Sparklines** - Mini price trend charts in signal table
+- **Kelly Position Size** - Visual bar showing recommended allocation per signal
+- **Toast Notifications** - Alert when new signals are detected
+- **Mobile Responsive** - Card layout on small screens, table on desktop
+- **Skeleton Loading** - Shimmer skeleton matching actual layout
+
 ## Architecture
 
 ```
@@ -49,15 +77,17 @@ polymarket-signal-agent/
 │   ├── config.py               # API keys, constants, thresholds
 │   ├── polymarket_client.py    # Polymarket API client
 │   ├── news_fetcher.py         # Multi-source news gathering
-│   ├── llm_analyzer.py         # Groq LLM probability estimation
-│   ├── signal_generator.py     # Edge calculation + signal generation
+│   ├── llm_analyzer.py         # Multi-LLM ensemble + calibration
+│   ├── signal_generator.py     # Edge + Kelly + signal generation
 │   ├── backtester.py           # Backtest engine with metrics
+│   ├── arbitrage.py            # Arbitrage detection scanner
+│   ├── price_history.py        # CLOB price history fetcher
 │   ├── data_store.py           # JSON-based data persistence
 │   └── main.py                 # CLI entry point
 ├── dashboard/                  # Next.js 14 frontend
 │   └── src/
-│       ├── app/                # Pages + API routes
-│       └── components/         # Dashboard UI components
+│       ├── app/                # Pages + API routes (5 endpoints)
+│       └── components/         # 9 dashboard UI components
 ├── data/                       # Pipeline output (JSON)
 └── scripts/
     ├── seed_data.py            # Demo data generator
@@ -68,17 +98,18 @@ polymarket-signal-agent/
 
 ### Engine
 - **Python 3.11+** with type hints
-- **Groq API** (Llama 3.3 70B Versatile) - probability estimation
+- **Groq API** (3-model ensemble: Llama 3.3 70B, Llama 3.1 8B, Gemma2 9B)
 - **Polymarket Gamma API** - market data
 - **feedparser** - Google News RSS parsing
-- **pandas** - data processing
-- **httpx** - async-capable HTTP client
+- **httpx** - HTTP client with rate limiting
 
 ### Dashboard
 - **Next.js 14** (App Router)
 - **TypeScript**
 - **Tailwind CSS** - dark theme
 - **Recharts** - PnL and edge charts
+- **Framer Motion** - animations
+- **Sonner** - toast notifications
 - **Lucide React** - icons
 
 ## Performance Metrics
@@ -87,11 +118,11 @@ From backtesting against resolved markets:
 
 | Metric | Value |
 |--------|-------|
-| Hit Rate | 61.1% |
-| Total P&L | +2.053 |
-| Sharpe Ratio | Positive |
-| Profit Factor | > 1.0 |
-| Actionable Signals | 23/25 |
+| Hit Rate | 82.3% |
+| Total P&L | +6.279 |
+| Actionable Signals | 22/25 |
+| Ensemble Models | 3 |
+| Calibration | Platt scaling (alpha=1.5) |
 
 ## Setup & Run
 
@@ -103,7 +134,7 @@ From backtesting against resolved markets:
 ### 1. Clone & Install
 
 ```bash
-git clone https://github.com/your-repo/polymarket-signal-agent.git
+git clone <repo-url>
 cd polymarket-signal-agent
 
 # Python dependencies
@@ -129,10 +160,10 @@ python scripts/seed_data.py
 ### 4. Run the Pipeline
 
 ```bash
-# Full pipeline (requires GROQ_API_KEY)
+# Full pipeline with ensemble + backtest
 python -m engine.main --markets 20 --backtest
 
-# With all options
+# With verbose logging
 python -m engine.main --markets 30 --backtest --verbose
 ```
 
@@ -156,19 +187,21 @@ npm run dev
 
 ## Dashboard Features
 
-- **Stats Overview** - Hit rate, Sharpe ratio, total signals, average edge
-- **Signal Table** - All signals ranked by score with color-coded badges
-- **P&L Chart** - Cumulative profit/loss curve
-- **Edge Distribution** - Bar chart of edge values across markets
-- **Backtest Panel** - Detailed performance metrics
-- **Signal Breakdown** - Distribution of signal types
-- **Top Signals** - Highest-conviction picks with reasoning
+- **Stats Overview** - Animated counters for hit rate, Sharpe ratio, signals, edge
+- **Signal Table** - Ranked signals with sparklines, Kelly sizing, expandable AI reasoning
+- **P&L Chart** - Cumulative profit/loss area chart with gradient fill
+- **Edge Distribution** - Color-coded bar chart of edge values
+- **Backtest Panel** - Full metrics with per-signal-type win rates
+- **Signal Breakdown** - Animated progress bars per signal type
+- **Top Signals** - Highest-conviction picks with chain-of-thought reasoning
+- **Live Status** - Auto-refresh countdown with pulse indicator
+- **Notifications** - Toast alerts for new signal detection
 
 ## Future Work
 
-- Live trading integration with Polymarket order placement
-- Multi-model ensemble (GPT-4, Claude, Llama) for consensus estimates
-- Real-time WebSocket updates for market odds
-- Additional data sources (Twitter/X sentiment, on-chain data)
-- Portfolio optimization with Kelly criterion sizing
-- Alert system (email/Telegram) for high-conviction signals
+- Real-time WebSocket streaming for live odds updates
+- Additional data sources (Twitter/X sentiment, on-chain wallet tracking)
+- Cross-platform arbitrage (Polymarket vs Kalshi)
+- Whale wallet tracking for smart money signals
+- MCP server for LLM-native access to signal data
+- Telegram/Discord alert integration

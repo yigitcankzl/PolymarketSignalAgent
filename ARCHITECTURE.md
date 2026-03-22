@@ -52,19 +52,28 @@ The Polymarket Signal Agent is a pipeline-based system that generates trading si
 - Caches results to avoid redundant API calls
 
 ### 3. LLM Analyzer (`llm_analyzer.py`)
-- Uses Groq API (OpenAI-compatible) with Llama 3.3 70B
-- Structured prompt engineering for probability estimation
-- Returns: probability, confidence, reasoning, key_factors
+- **Multi-LLM Ensemble**: Queries 3 Groq models (Llama 3.3 70B, Llama 3.1 8B, Gemma2 9B)
+- **Superforecaster Prompting**: Tetlock-style methodology with base rate decomposition, evidence weighing, and decisive estimation
+- **Median Aggregation**: Takes median probability across models for robustness
+- **Platt Scaling Calibration**: `P_cal = 1/(1+exp(-alpha*logit(P)))` with alpha=1.5 to fix LLM hedging bias
+- **Confidence Adjustment**: Model disagreement (spread) reduces confidence automatically
+- Returns: probability, confidence, reasoning, key_factors, ensemble metadata
 - Rate limiting: 2.5s between requests (30 RPM Groq limit)
 - Robust JSON parsing with regex fallbacks
-- Automatic retry on parse failures (max 2 retries)
 - Graceful fallback to market odds on total failure
 
 ### 4. Signal Generator (`signal_generator.py`)
-- **Edge Formula**: `edge = llm_probability - market_odds`
+- **Edge Formula**: `edge = calibrated_llm_probability - market_odds`
 - Five-tier classification: STRONG_BUY, BUY, HOLD, SELL, STRONG_SELL
 - **Score**: `abs(edge) * confidence` for ranking
+- **Kelly Criterion**: Fractional Kelly (quarter, 5% cap) position sizing per signal
+- **Polymarket Links**: Direct URL to market page via slug
 - Exports to JSON with `latest.json` for dashboard consumption
+
+### 4b. Arbitrage Scanner (`arbitrage.py`)
+- **Intra-market**: Detects when YES + NO best prices < $1.00 (guaranteed profit)
+- **Related-market**: Finds pricing discrepancies between similar questions via keyword overlap
+- Results exported to `data/arbitrage/latest.json`
 
 ### 5. Backtester (`backtester.py`)
 - PnL calculation per trade based on signal direction and resolution
@@ -86,15 +95,18 @@ Engine writes:                    Dashboard reads:
 data/signals/latest.json    ←──  /api/signals (GET)
 data/markets/latest.json    ←──  /api/markets (GET)
 data/backtest/latest.json   ←──  /api/backtest (GET)
+data/arbitrage/latest.json  ←──  /api/arbitrage (GET)
 ```
 
-API routes are simple `fs.readFile` operations that return JSON. The dashboard refreshes on page load - it's not real-time but sufficient for a signal generation system that runs periodically.
+API routes are simple `fs.readFile` operations that return JSON. The dashboard auto-refreshes every 30 seconds with a countdown timer and toast notifications for new signals.
 
 ## Design Decisions
 
-### Why Groq over OpenAI/Anthropic?
+### Why Groq with 3-model ensemble?
 - Free tier with generous limits (30 RPM, 14400 RPD)
-- Llama 3.3 70B provides strong reasoning at zero cost
+- 3 diverse models (70B, 8B, 9B) provide ensemble diversity at zero cost
+- Median aggregation is robust to individual model errors
+- Research shows LLM ensembles match human forecaster accuracy (Science Advances, 2024)
 - OpenAI-compatible API means easy migration to other providers
 
 ### Why JSON files instead of a database?
@@ -118,19 +130,22 @@ API routes are simple `fs.readFile` operations that return JSON. The dashboard r
 
 ## Edge Calculation Theory
 
-The system's core hypothesis: **LLMs can detect information edges in prediction markets by synthesizing recent news faster than the market can price it in.**
+The system's core hypothesis: **LLM ensembles with calibrated probabilities can detect information edges in prediction markets by synthesizing recent news faster than the market can price it in.**
 
 ```
-Edge = P(LLM) - P(Market)
-
-If Edge > threshold → the market hasn't fully priced in recent information
-If Edge < -threshold → the market may be overpricing the event
+Raw Probability = median(Model1, Model2, Model3)
+Calibrated P    = 1 / (1 + exp(-1.5 * logit(Raw P)))     # Platt scaling
+Edge            = Calibrated P - Market Odds
+Kelly Size      = (edge * confidence) / odds * 0.25       # Quarter Kelly, capped at 5%
 ```
+
+The calibration step is critical: LLMs trained with RLHF tend to hedge toward 0.5. Platt scaling with alpha=1.5 pushes a hedged 0.6 → 0.65 and 0.7 → 0.78, producing more decisive and profitable signals.
 
 The system is most valuable when:
 1. News breaks that hasn't been reflected in market prices yet
-2. The LLM can correctly interpret the impact of news on event probability
+2. Multiple models agree on direction (low ensemble spread)
 3. The confidence is high enough to filter noise from signal
+4. Kelly sizing prevents overexposure to any single market
 
 ## Rate Limits & Performance
 
@@ -141,9 +156,11 @@ The system is most valuable when:
 | NewsData.io | 200/day | Secondary, optional |
 | Polymarket | None (public) | Basic httpx timeouts |
 
-For 30 markets, the full pipeline takes approximately:
+For 30 markets with ensemble enabled, the full pipeline takes approximately:
 - Market fetch: ~2s
 - News fetch: ~30s (parallel-capable, currently sequential)
-- LLM analysis: ~75s (30 markets * 2.5s rate limit)
-- Signal generation: <1s
-- **Total: ~2 minutes**
+- LLM ensemble analysis: ~225s (30 markets * 3 models * 2.5s rate limit)
+- Signal generation + arbitrage scan: <1s
+- **Total: ~4.5 minutes**
+
+With ensemble disabled (`ENSEMBLE_ENABLED=false`), runtime drops to ~2 minutes.
