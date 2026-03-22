@@ -194,6 +194,20 @@ def run_pipeline(
     # Step 5: Cross-platform arbitrage scan
     print("[5/6] Scanning for arbitrage opportunities...")
     arb_result = scan_all_arbitrage(markets, kalshi_markets if kalshi_markets else None)
+
+    # Search-based cross-platform arb via Synthesis API
+    if use_synthesis:
+        print("  Running Synthesis cross-platform search...")
+        with SynthesisClient() as client:
+            synthesis_arbs = client.detect_arbitrage(markets, min_price_diff=0.03, max_search=10)
+            if synthesis_arbs:
+                arb_result["cross_platform"] = synthesis_arbs
+                arb_result["total_opportunities"] += len(synthesis_arbs)
+                # Re-save with updated data
+                from engine.config import DATA_DIR
+                arb_path = DATA_DIR / "arbitrage" / "latest.json"
+                arb_path.write_text(json.dumps(arb_result, indent=2, default=str))
+
     print(f"  Found {arb_result['total_opportunities']} arbitrage opportunities\n")
 
     # Step 6: Export

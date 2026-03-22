@@ -243,72 +243,103 @@ class SynthesisClient:
 
     # ── Cross-platform arbitrage ───────────────────────────────────
 
-    def detect_arbitrage(self, min_price_diff: float = 0.03) -> list[dict]:
-        """Detect cross-platform arbitrage using similar pairs endpoint.
+    def detect_arbitrage(
+        self,
+        polymarket_markets: list[dict],
+        min_price_diff: float = 0.03,
+        max_search: int = 15,
+    ) -> list[dict]:
+        """Detect cross-platform arbitrage by searching for matching markets.
 
-        Uses Synthesis's built-in similar market pairs to find
-        price discrepancies between Polymarket and Kalshi.
+        For each Polymarket market, searches Kalshi for the same event
+        via Synthesis search API and compares prices.
         """
-        pairs = self.get_similar_pairs()
         opportunities = []
+        searched = 0
 
-        for pair in pairs:
-            markets = pair if isinstance(pair, list) else pair.get("markets", [])
-            if len(markets) < 2:
+        for pm in polymarket_markets:
+            if searched >= max_search:
+                break
+
+            pm_question = pm.get("question", pm.get("title", ""))
+            pm_outcome = pm.get("outcome", "")
+            if not pm_question:
                 continue
 
-            # Find Polymarket and Kalshi entries
-            pm_market = None
-            km_market = None
-            for m in markets:
-                venue = m.get("venue", m.get("platform", "")).lower()
-                if "poly" in venue:
-                    pm_market = m
-                elif "kalshi" in venue:
-                    km_market = m
+            # Build search query from key terms
+            search_terms = pm_outcome if pm_outcome else pm_question
+            # Shorten to key words for better search
+            words = search_terms.split()[:5]
+            query = " ".join(words)
 
-            if not pm_market or not km_market:
+            if len(query) < 3:
                 continue
 
-            pm_price = float(pm_market.get("yes_price", pm_market.get("price", 0.5)))
-            km_price = float(km_market.get("yes_price", km_market.get("price", 0.5)))
-            diff = abs(pm_price - km_price)
+            searched += 1
+            logger.info(f"  Arb search {searched}/{max_search}: '{query}'")
 
-            if diff < min_price_diff:
+            try:
+                kalshi_results = self.search_markets(query, venue="kalshi")
+            except Exception as e:
+                logger.warning(f"  Search failed: {e}")
                 continue
 
-            if pm_price < km_price:
-                action = "BUY on Polymarket, SELL on Kalshi"
-                buy_price, sell_price = pm_price, km_price
-            else:
-                action = "BUY on Kalshi, SELL on Polymarket"
-                buy_price, sell_price = km_price, pm_price
+            if not kalshi_results:
+                continue
 
-            slug = pm_market.get("slug", "")
-            opportunities.append({
-                "type": "cross_platform",
-                "polymarket": {
-                    "id": pm_market.get("id", ""),
-                    "question": pm_market.get("question", pm_market.get("title", "")),
-                    "yes_price": round(pm_price, 4),
-                    "slug": slug,
-                },
-                "kalshi": {
-                    "id": km_market.get("id", ""),
-                    "question": km_market.get("question", km_market.get("title", "")),
-                    "yes_price": round(km_price, 4),
-                },
-                "price_difference": round(diff, 4),
-                "profit_potential_pct": round(diff * 100, 2),
-                "action": action,
-                "buy_price": round(buy_price, 4),
-                "sell_price": round(sell_price, 4),
-                "synthesis_url": f"https://synthesis.trade/market/{slug}" if slug else "",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-            })
+            pm_price = float(pm.get("yes_odds", pm.get("left_price", 0.5)))
+
+            # Check each Kalshi result for price discrepancy
+            for km_entry in kalshi_results[:3]:
+                km_markets = km_entry.get("markets", [km_entry])
+                if isinstance(km_markets, dict):
+                    km_markets = [km_markets]
+
+                for km in (km_markets if isinstance(km_markets, list) else [km_markets]):
+                    km_title = km.get("title", km.get("question", ""))
+                    km_price = float(km.get("left_price", km.get("yes_price", 0)))
+
+                    if km_price <= 0 or km_price >= 1:
+                        continue
+
+                    diff = abs(pm_price - km_price)
+                    if diff < min_price_diff:
+                        continue
+
+                    if pm_price < km_price:
+                        action = "BUY on Polymarket, SELL on Kalshi"
+                        buy_price, sell_price = pm_price, km_price
+                    else:
+                        action = "BUY on Kalshi, SELL on Polymarket"
+                        buy_price, sell_price = km_price, pm_price
+
+                    slug = pm.get("event_slug", pm.get("slug", ""))
+                    opportunities.append({
+                        "type": "cross_platform",
+                        "polymarket": {
+                            "id": pm.get("id", ""),
+                            "question": pm_question,
+                            "outcome": pm_outcome,
+                            "yes_price": round(pm_price, 4),
+                            "slug": slug,
+                        },
+                        "kalshi": {
+                            "id": km.get("market_id", km.get("id", "")),
+                            "question": km_title,
+                            "yes_price": round(km_price, 4),
+                        },
+                        "price_difference": round(diff, 4),
+                        "profit_potential_pct": round(diff * 100, 2),
+                        "action": action,
+                        "buy_price": round(buy_price, 4),
+                        "sell_price": round(sell_price, 4),
+                        "synthesis_url": f"https://synthesis.trade/market/{slug}" if slug else "",
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    })
+                    break  # One match per Kalshi result is enough
 
         opportunities.sort(key=lambda x: x["price_difference"], reverse=True)
-        logger.info(f"Synthesis arbitrage: {len(opportunities)} opportunities (min diff: {min_price_diff})")
+        logger.info(f"Synthesis arbitrage: {len(opportunities)} opportunities found")
 
         # Save results
         SYNTHESIS_MARKETS_DIR.mkdir(parents=True, exist_ok=True)
