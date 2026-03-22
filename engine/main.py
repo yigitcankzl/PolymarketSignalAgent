@@ -77,6 +77,9 @@ def _fetch_markets_synthesis(max_markets: int) -> tuple[list[dict], list[dict]]:
                 "synthesis_url": f"https://synthesis.trade/market/{event_slug}",
             })
 
+        # Filter out extreme tail markets (< 10% or > 90% odds have no edge potential)
+        markets = [m for m in markets if 0.10 <= m["yes_odds"] <= 0.90]
+
         # Sort by volume, take top N
         markets.sort(key=lambda x: x["volume"], reverse=True)
         markets = markets[:max_markets]

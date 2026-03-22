@@ -78,6 +78,9 @@ def _format_news(news: list[dict], max_articles: int = 8) -> str:
 
 def _parse_llm_response(text: str) -> Optional[dict]:
     """Parse JSON from LLM response, handling common formatting issues."""
+    # Strip thinking tags (qwen models wrap reasoning in <think>)
+    text = re.sub(r"<think>[\s\S]*?</think>", "", text).strip()
+
     # Try direct parse first
     try:
         return json.loads(text)
@@ -93,7 +96,7 @@ def _parse_llm_response(text: str) -> Optional[dict]:
             pass
 
     # Try finding JSON object pattern
-    json_match = re.search(r"\{[\s\S]*\}", text)
+    json_match = re.search(r"\{[\s\S]*?\}", text)
     if json_match:
         try:
             return json.loads(json_match.group(0))
