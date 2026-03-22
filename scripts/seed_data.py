@@ -109,17 +109,50 @@ def generate_signal(market: dict, base_time: datetime, offset_hours: int) -> dic
         "Technology adoption rates", "Demographic trends", "Credit market conditions",
     ]
 
+    # Kelly criterion
+    kelly = 0.0
+    if abs(edge) > 0.01 and confidence > 0.3:
+        if edge > 0:
+            p = min(0.95, market_odds + edge)
+            b = (1 / market_odds) - 1 if market_odds > 0 else 0
+        else:
+            p = min(0.95, (1 - market_odds) + abs(edge))
+            b = (1 / (1 - market_odds)) - 1 if market_odds < 1 else 0
+        if b > 0:
+            q = 1 - p
+            kelly = max(0, ((p * b - q) / b) * 0.25 * confidence)
+            kelly = min(kelly, 0.05)
+
+    # Ensemble data (simulated)
+    model_predictions = {
+        "llama-3.3-70b-versatile": round(llm_prob + random.gauss(0, 0.03), 4),
+        "llama-3.1-8b-instant": round(llm_prob + random.gauss(0, 0.05), 4),
+        "gemma2-9b-it": round(llm_prob + random.gauss(0, 0.04), 4),
+    }
+    model_predictions = {k: max(0.02, min(0.98, v)) for k, v in model_predictions.items()}
+    spread = max(model_predictions.values()) - min(model_predictions.values())
+
     return {
         "market_id": market["id"],
         "question": market["question"],
         "market_odds": market_odds,
         "llm_probability": round(llm_prob, 4),
+        "raw_probability": round(llm_prob * 0.95 + 0.025, 4),  # pre-calibration
         "edge": edge,
         "confidence": confidence,
         "signal": signal,
         "score": score,
+        "kelly_fraction": round(kelly, 4),
+        "polymarket_url": f"https://polymarket.com/event/{market.get('slug', '')}",
         "reasoning": random.choice(reasonings),
-        "key_factors": random.sample(factors_pool, random.randint(2, 4)),
+        "key_factors": random.sample(factors_pool, random.randint(3, 5)),
+        "ensemble": {
+            "models_used": 3,
+            "model_predictions": model_predictions,
+            "median": round(sorted(model_predictions.values())[1], 4),
+            "spread": round(spread, 4),
+            "calibrated": round(llm_prob, 4),
+        },
         "timestamp": ts.isoformat(),
         "news_count": random.randint(3, 12),
     }
@@ -286,13 +319,44 @@ def main():
     backtest_data = generate_backtest_data(signals, markets)
     backtest_data["run_at"] = base_time.isoformat()
 
+    # Generate arbitrage opportunities
+    arb_data = {
+        "scanned_at": base_time.isoformat(),
+        "markets_scanned": len(markets),
+        "intra_market": [
+            {
+                "type": "intra_market",
+                "market_id": markets[5]["id"],
+                "question": markets[5]["question"],
+                "yes_price": round(markets[5]["yes_odds"], 4),
+                "no_price": round(1 - markets[5]["yes_odds"] - 0.03, 4),
+                "total_cost": round(markets[5]["yes_odds"] + (1 - markets[5]["yes_odds"] - 0.03), 4),
+                "guaranteed_profit_pct": 3.0,
+                "slug": markets[5].get("slug", ""),
+                "timestamp": base_time.isoformat(),
+            },
+        ],
+        "related_market": [
+            {
+                "type": "related_market",
+                "market_1": {"id": markets[0]["id"], "question": markets[0]["question"], "odds": markets[0]["yes_odds"]},
+                "market_2": {"id": markets[3]["id"], "question": markets[3]["question"], "odds": markets[3]["yes_odds"]},
+                "odds_difference": round(abs(markets[0]["yes_odds"] - markets[3]["yes_odds"]), 4),
+                "overlap_score": 0.42,
+                "timestamp": base_time.isoformat(),
+            },
+        ],
+        "total_opportunities": 2,
+    }
+
     # Save everything
-    for subdir in ["markets", "signals", "backtest"]:
+    for subdir in ["markets", "signals", "backtest", "arbitrage"]:
         (DATA_DIR / subdir).mkdir(parents=True, exist_ok=True)
 
     (DATA_DIR / "markets" / "latest.json").write_text(json.dumps(markets_data, indent=2))
     (DATA_DIR / "signals" / "latest.json").write_text(json.dumps(signals_data, indent=2))
     (DATA_DIR / "backtest" / "latest.json").write_text(json.dumps(backtest_data, indent=2))
+    (DATA_DIR / "arbitrage" / "latest.json").write_text(json.dumps(arb_data, indent=2))
 
     print(f"Seed data generated:")
     print(f"  Markets:  {len(markets)}")
