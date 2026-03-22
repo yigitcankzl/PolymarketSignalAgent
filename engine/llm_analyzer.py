@@ -1,14 +1,19 @@
-"""LLM-based market analysis using Groq API."""
+"""LLM-based market analysis using Groq API with ensemble support."""
 
 import json
+import math
 import re
+import statistics
 import time
 import logging
 from typing import Optional
 
 from openai import OpenAI
 
-from engine.config import GROQ_API_KEY, LLM_MODEL, LLM_BASE_URL, LLM_REQUEST_DELAY
+from engine.config import (
+    GROQ_API_KEY, LLM_MODEL, LLM_BASE_URL, LLM_REQUEST_DELAY,
+    ENSEMBLE_MODELS, ENSEMBLE_ENABLED,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +116,21 @@ def _validate_analysis(data: dict) -> dict:
     }
 
 
+def calibrate_probability(p: float, alpha: float = 1.5) -> float:
+    """Apply extremization to fix LLM's tendency to hedge toward 0.5.
+
+    Uses Platt-style scaling: pushes probabilities away from 0.5
+    toward 0 or 1 based on the alpha parameter.
+    alpha > 1 = more extreme, alpha = 1 = no change.
+    """
+    if p <= 0.01 or p >= 0.99:
+        return p
+    logit = math.log(p / (1 - p))
+    adjusted_logit = alpha * logit
+    calibrated = 1 / (1 + math.exp(-adjusted_logit))
+    return max(0.01, min(0.99, calibrated))
+
+
 class LLMAnalyzer:
     """Analyzes prediction markets using Groq-hosted LLMs."""
 
@@ -193,27 +213,118 @@ class LLMAnalyzer:
             "key_factors": [],
         }
 
+    def _single_model_call(
+        self, model: str, user_prompt: str, market: dict
+    ) -> Optional[dict]:
+        """Make a single LLM call with a specific model."""
+        self._rate_limit_wait()
+        self._last_request_time = time.time()
+
+        try:
+            response = self.client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=0.3,
+                max_tokens=500,
+            )
+            text = response.choices[0].message.content or ""
+            parsed = _parse_llm_response(text)
+            if parsed:
+                return _validate_analysis(parsed)
+        except Exception as e:
+            logger.warning(f"Model {model} failed: {e}")
+        return None
+
+    def ensemble_analyze(
+        self,
+        market: dict,
+        news: list[dict],
+        hours_back: int = 48,
+    ) -> dict:
+        """Analyze using multiple models and take median probability.
+
+        Returns dict with probability, confidence, reasoning, key_factors,
+        plus ensemble metadata (individual model predictions).
+        """
+        formatted_news = _format_news(news)
+        user_prompt = USER_PROMPT_TEMPLATE.format(
+            question=market["question"],
+            current_odds=market["yes_odds"],
+            description=market.get("description", "")[:500],
+            news_count=len(news),
+            hours=hours_back,
+            formatted_news=formatted_news,
+        )
+
+        model_results: list[dict] = []
+        model_probs: list[float] = []
+
+        for model in ENSEMBLE_MODELS:
+            logger.info(f"  Ensemble: querying {model}...")
+            result = self._single_model_call(model, user_prompt, market)
+            if result:
+                model_results.append({"model": model, **result})
+                model_probs.append(result["probability"])
+
+        if not model_probs:
+            return self.analyze_market(market, news, hours_back)
+
+        # Take median probability and mean confidence
+        median_prob = statistics.median(model_probs)
+        calibrated_prob = calibrate_probability(median_prob)
+        avg_confidence = statistics.mean([r["confidence"] for r in model_results])
+
+        # Use reasoning from the primary model (first successful)
+        primary = model_results[0]
+        spread = max(model_probs) - min(model_probs)
+
+        # Higher spread = lower confidence (models disagree)
+        adjusted_confidence = avg_confidence * max(0.5, 1 - spread)
+
+        logger.info(
+            f"  Ensemble result: median={median_prob:.2f}, calibrated={calibrated_prob:.2f}, "
+            f"spread={spread:.2f}, models={len(model_probs)}"
+        )
+
+        return {
+            "probability": calibrated_prob,
+            "raw_probability": median_prob,
+            "confidence": round(adjusted_confidence, 4),
+            "reasoning": primary["reasoning"],
+            "key_factors": primary["key_factors"],
+            "ensemble": {
+                "models_used": len(model_probs),
+                "model_predictions": {r["model"]: r["probability"] for r in model_results},
+                "median": median_prob,
+                "spread": round(spread, 4),
+                "calibrated": calibrated_prob,
+            },
+        }
+
     def batch_analyze(
         self,
         markets: list[dict],
         news_map: dict[str, list[dict]],
     ) -> list[dict]:
-        """Analyze multiple markets sequentially with rate limiting.
+        """Analyze multiple markets with ensemble or single model.
 
-        Args:
-            markets: List of market dicts
-            news_map: Dict mapping market_id -> list of news articles
-
-        Returns:
-            List of dicts with market info + analysis results
+        Uses ensemble if ENSEMBLE_ENABLED, otherwise single model.
         """
         results = []
         total = len(markets)
+        use_ensemble = ENSEMBLE_ENABLED
 
         for i, market in enumerate(markets, 1):
             logger.info(f"Analyzing market {i}/{total}: {market['question'][:60]}")
             news = news_map.get(market["id"], [])
-            analysis = self.analyze_market(market, news)
+
+            if use_ensemble:
+                analysis = self.ensemble_analyze(market, news)
+            else:
+                analysis = self.analyze_market(market, news)
 
             results.append({
                 "market_id": market["id"],

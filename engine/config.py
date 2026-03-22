@@ -23,6 +23,14 @@ LLM_MODEL = os.getenv("LLM_MODEL", "llama-3.3-70b-versatile")
 LLM_BASE_URL = "https://api.groq.com/openai/v1"
 LLM_REQUEST_DELAY = 2.5  # seconds between requests (30 RPM limit)
 
+# Ensemble models (multiple models for consensus)
+ENSEMBLE_MODELS = [
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+    "gemma2-9b-it",
+]
+ENSEMBLE_ENABLED = os.getenv("ENSEMBLE_ENABLED", "true").lower() == "true"
+
 # News
 NEWS_API_KEY = os.getenv("NEWS_API_KEY", "")
 NEWS_HOURS_BACK = int(os.getenv("NEWS_HOURS_BACK", "48"))
