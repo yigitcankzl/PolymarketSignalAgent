@@ -27,46 +27,57 @@ logger = logging.getLogger(__name__)
 def _fetch_markets_synthesis(max_markets: int) -> tuple[list[dict], list[dict]]:
     """Fetch markets via Synthesis API (unified Polymarket + Kalshi)."""
     with SynthesisClient() as client:
-        # Get Polymarket markets (returns list of {event, markets[]})
-        pm_events = client.get_polymarket_markets(limit=max_markets)
+        # Fetch more events to get diversity (each event has many sub-markets)
+        pm_events = client.get_polymarket_markets(limit=max(max_markets, 50))
 
-        # Flatten: each event contains multiple sub-markets
+        # Take top 1 sub-market per event (highest volume) for diversity
         markets = []
         for entry in pm_events:
             event = entry.get("event", {})
             sub_markets = entry.get("markets", [])
             event_slug = event.get("slug", "")
 
-            for m in sub_markets:
-                market_id = m.get("condition_id", m.get("slug", ""))
-                if not market_id or not m.get("active", True):
-                    continue
+            if not sub_markets:
+                continue
 
-                yes_price = float(m.get("left_price", 0.5))
-                no_price = float(m.get("right_price", 1 - yes_price))
+            # Sort sub-markets by volume, pick the top one per event
+            sorted_subs = sorted(
+                sub_markets,
+                key=lambda x: float(x.get("volume", 0) or 0),
+                reverse=True,
+            )
 
-                markets.append({
-                    "id": market_id,
-                    "question": m.get("question", ""),
-                    "description": m.get("description", event.get("description", "")),
-                    "slug": m.get("slug", ""),
-                    "event_slug": event_slug,
-                    "outcome": m.get("outcome", ""),
-                    "yes_odds": yes_price,
-                    "no_odds": no_price,
-                    "outcomes": [m.get("left_outcome", "Yes"), m.get("right_outcome", "No")],
-                    "volume": float(m.get("volume", 0) or 0),
-                    "liquidity": float(m.get("liquidity", 0) or 0),
-                    "end_date": event.get("ends_at", ""),
-                    "active": m.get("active", True),
-                    "closed": False,
-                    "resolved": m.get("resolved", False),
-                    "resolution": None,
-                    "venue": "polymarket",
-                    "synthesis_url": f"https://synthesis.trade/market/{event_slug}",
-                })
+            # Take top 1 from this event (the most traded outcome)
+            m = sorted_subs[0]
+            market_id = m.get("condition_id", m.get("slug", ""))
+            if not market_id or not m.get("active", True):
+                continue
 
-        # Keep top markets by volume
+            yes_price = float(m.get("left_price", 0.5))
+            no_price = float(m.get("right_price", 1 - yes_price))
+
+            markets.append({
+                "id": market_id,
+                "question": m.get("question", event.get("title", "")),
+                "description": m.get("description", event.get("description", "")),
+                "slug": m.get("slug", ""),
+                "event_slug": event_slug,
+                "outcome": m.get("outcome", ""),
+                "yes_odds": yes_price,
+                "no_odds": no_price,
+                "outcomes": [m.get("left_outcome", "Yes"), m.get("right_outcome", "No")],
+                "volume": float(m.get("volume", 0) or 0),
+                "liquidity": float(m.get("liquidity", 0) or 0),
+                "end_date": event.get("ends_at", ""),
+                "active": m.get("active", True),
+                "closed": False,
+                "resolved": m.get("resolved", False),
+                "resolution": None,
+                "venue": "polymarket",
+                "synthesis_url": f"https://synthesis.trade/market/{event_slug}",
+            })
+
+        # Sort by volume, take top N
         markets.sort(key=lambda x: x["volume"], reverse=True)
         markets = markets[:max_markets]
 

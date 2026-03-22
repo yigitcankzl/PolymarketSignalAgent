@@ -31,7 +31,7 @@ LLM_REQUEST_DELAY = 2.5  # seconds between requests (30 RPM limit)
 ENSEMBLE_MODELS = [
     "llama-3.3-70b-versatile",
     "llama-3.1-8b-instant",
-    "llama3-70b-8192",
+    "qwen/qwen3-32b",
 ]
 ENSEMBLE_ENABLED = os.getenv("ENSEMBLE_ENABLED", "true").lower() == "true"
 
