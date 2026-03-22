@@ -10,6 +10,7 @@ import { EdgeChart } from "@/components/edge-chart";
 import { BacktestPanel } from "@/components/backtest-panel";
 import { SignalBreakdown } from "@/components/signal-breakdown";
 import { TopSignals } from "@/components/top-signals";
+import { ArbitragePanel } from "@/components/arbitrage-panel";
 import { DashboardSkeleton } from "@/components/skeleton";
 
 interface SignalEntry {
@@ -89,24 +90,44 @@ interface MarketsData {
 
 const REFRESH_INTERVAL = 30;
 
+interface ArbitrageData {
+  cross_platform: Array<{
+    type: string;
+    polymarket: { id: string; question: string; yes_price: number; slug: string };
+    kalshi: { id: string; question: string; yes_price: number };
+    price_difference: number;
+    profit_potential_pct: number;
+    action: string;
+    buy_platform: string;
+    sell_platform: string;
+    buy_price: number;
+    sell_price: number;
+    synthesis_url: string;
+  }>;
+  total_opportunities: number;
+}
+
 export default function Dashboard() {
   const [signals, setSignals] = useState<SignalData | null>(null);
   const [backtest, setBacktest] = useState<BacktestData | null>(null);
   const [markets, setMarkets] = useState<MarketsData | null>(null);
+  const [arbitrage, setArbitrage] = useState<ArbitrageData | null>(null);
   const [loading, setLoading] = useState(true);
   const prevSignalCount = useRef<number>(0);
 
   const fetchData = useCallback(async () => {
     try {
-      const [sigRes, btRes, mkRes] = await Promise.all([
+      const [sigRes, btRes, mkRes, arbRes] = await Promise.all([
         fetch("/api/signals"),
         fetch("/api/backtest"),
         fetch("/api/markets"),
+        fetch("/api/arbitrage"),
       ]);
-      const [sigData, btData, mkData] = await Promise.all([
+      const [sigData, btData, mkData, arbData] = await Promise.all([
         sigRes.json(),
         btRes.json(),
         mkRes.json(),
+        arbRes.json(),
       ]);
 
       // Detect new signals
@@ -121,6 +142,7 @@ export default function Dashboard() {
       setSignals(sigData);
       setBacktest(btData);
       setMarkets(mkData);
+      setArbitrage(arbData);
     } catch (err) {
       console.error("Failed to fetch data:", err);
     } finally {
@@ -170,6 +192,10 @@ export default function Dashboard() {
 
           <div className="space-y-6">
             <BacktestPanel metrics={backtest?.metrics || null} />
+            <ArbitragePanel
+              crossPlatform={arbitrage?.cross_platform || []}
+              totalOpportunities={arbitrage?.total_opportunities || 0}
+            />
             <SignalBreakdown signals={allSignals} />
             <TopSignals signals={allSignals} />
           </div>
@@ -177,7 +203,16 @@ export default function Dashboard() {
       </main>
 
       <footer className="border-t border-zinc-800 mt-12 py-6 text-center text-xs text-zinc-600">
-        Polymarket Signal Agent — Built for ETHGlobal Hackathon 2026
+        <span>Polymarket Signal Agent — Built for ETHGlobal Hackathon 2026</span>
+        <span className="mx-2">&middot;</span>
+        <a
+          href="https://synthesis.trade"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-blue-400 hover:text-blue-300 transition-colors"
+        >
+          Powered by Synthesis.trade
+        </a>
       </footer>
     </div>
   );
