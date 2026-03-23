@@ -1,6 +1,15 @@
 # Polymarket Signal Agent
 
-> **Orderflow 001 Hackathon** — AI-Augmented Systems Track
+[![Python](https://img.shields.io/badge/Python_3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
+[![Next.js](https://img.shields.io/badge/Next.js_14-000000?style=for-the-badge&logo=nextdotjs&logoColor=white)](https://nextjs.org)
+[![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://typescriptlang.org)
+[![Tailwind](https://img.shields.io/badge/Tailwind_CSS-06B6D4?style=for-the-badge&logo=tailwindcss&logoColor=white)](https://tailwindcss.com)
+[![Groq](https://img.shields.io/badge/Groq_AI-F55036?style=for-the-badge&logo=groq&logoColor=white)](https://groq.com)
+[![Synthesis](https://img.shields.io/badge/Synthesis.trade-8B5CF6?style=for-the-badge&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCI+PHBhdGggZD0iTTEyIDJMMiAyMmgyMEwxMiAyeiIgZmlsbD0id2hpdGUiLz48L3N2Zz4=&logoColor=white)](https://synthesis.trade)
+[![Framer Motion](https://img.shields.io/badge/Framer_Motion-0055FF?style=for-the-badge&logo=framer&logoColor=white)](https://www.framer.com/motion)
+[![Recharts](https://img.shields.io/badge/Recharts-22C55E?style=for-the-badge&logo=chart.js&logoColor=white)](https://recharts.org)
+
+> **Orderflow 001 Hackathon** — AI-Augmented Systems Track | **Sponsor:** [Synthesis.trade](https://synthesis.trade)
 >
 > An end-to-end AI trading system for prediction markets. Fetches live data from Polymarket and Kalshi via [Synthesis.trade](https://synthesis.trade) unified API, analyzes with a multi-LLM ensemble, detects cross-platform arbitrage, and executes trades — all from a single dashboard.
 
