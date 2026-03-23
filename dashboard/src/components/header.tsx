@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Activity, BarChart3, TrendingUp, RefreshCw, Play } from "lucide-react";
+import { Activity, BarChart3, TrendingUp, RefreshCw, Play, Github } from "lucide-react";
 import { toast } from "sonner";
 
 interface HeaderProps {
@@ -94,6 +94,14 @@ export function Header({ marketCount, lastRun, onRefresh, refreshInterval, onPip
             <Activity className="w-3.5 h-3.5" />
             <span>{lastRun || "—"}</span>
           </div>
+          <a
+            href="https://github.com/yigitcankzl/PolymarketSignalAgent"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-white transition-all text-xs"
+          >
+            <Github className="w-3.5 h-3.5" />
+          </a>
           <button
             onClick={handleRunPipeline}
             disabled={isRunning}

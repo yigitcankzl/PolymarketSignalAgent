@@ -198,7 +198,7 @@ Kelly Fraction   = (p×b − q) / b × 0.25, capped at 5%
 
 ### Quick Start
 ```bash
-git clone <repo-url>
+git clone https://github.com/yigitcankzl/PolymarketSignalAgent.git
 cd polymarket-signal-agent
 
 # Engine
