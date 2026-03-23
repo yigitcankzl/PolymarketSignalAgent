@@ -19,6 +19,12 @@ An end-to-end AI trading system for prediction markets. Fetches live data from P
 
 </div>
 
+## Screenshots
+
+![Dashboard Overview](assets/1.png)
+
+![Signal Details & Arbitrage](assets/2.png)
+
 ## Demo
 
 **Video:** [Watch Demo](#) *(2-3 min)*
