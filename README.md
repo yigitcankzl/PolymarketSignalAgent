@@ -15,9 +15,9 @@
 
 **Orderflow 001 Hackathon** — AI-Augmented Systems Track | **Sponsor:** [Synthesis.trade](https://synthesis.trade)
 
+An end-to-end AI trading system for prediction markets. Fetches live data from Polymarket and Kalshi via [Synthesis.trade](https://synthesis.trade) unified API, analyzes with a multi-LLM ensemble, detects cross-platform arbitrage, and executes trades — all from a single dashboard.
+
 </div>
->
-> An end-to-end AI trading system for prediction markets. Fetches live data from Polymarket and Kalshi via [Synthesis.trade](https://synthesis.trade) unified API, analyzes with a multi-LLM ensemble, detects cross-platform arbitrage, and executes trades — all from a single dashboard.
 
 ## Demo
 
