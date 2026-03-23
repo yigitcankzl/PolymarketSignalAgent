@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { ChevronDown, ExternalLink } from "lucide-react";
+import { ChevronDown, ExternalLink, ShoppingCart } from "lucide-react";
+import { toast } from "sonner";
 import { cn, getSignalBg, formatPercent } from "@/lib/utils";
 
 interface Signal {
@@ -98,17 +99,65 @@ function SignalDetail({ signal }: { signal: Signal }) {
               </div>
             )}
 
-            {signal.polymarket_url && (
-              <a
-                href={signal.polymarket_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 text-xs text-blue-400 hover:text-blue-300 transition-colors"
-              >
-                <ExternalLink className="w-3 h-3" />
-                View on Polymarket
-              </a>
-            )}
+            <div className="flex items-center gap-2 flex-wrap">
+              {signal.signal.includes("BUY") && (
+                <button
+                  onClick={async (e) => {
+                    e.stopPropagation();
+                    const amount = signal.kelly_fraction ? Math.max(0.5, signal.kelly_fraction * 100).toFixed(2) : "1";
+                    toast.info(`Placing BUY $${amount} order...`);
+                    try {
+                      const resp = await fetch("/api/trade", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ token_id: signal.market_id, side: "BUY", amount }),
+                      });
+                      const data = await resp.json();
+                      if (data.success) toast.success(`Order placed: BUY $${amount}`);
+                      else toast.error(data.error || data.order?.response || "Order failed");
+                    } catch { toast.error("Order request failed"); }
+                  }}
+                  className="inline-flex items-center gap-1 text-[10px] px-2.5 py-1 rounded-full bg-green-600 hover:bg-green-500 text-white font-medium transition-colors"
+                >
+                  <ShoppingCart className="w-2.5 h-2.5" />
+                  BUY ${signal.kelly_fraction ? Math.max(0.5, signal.kelly_fraction * 100).toFixed(0) : "1"}
+                </button>
+              )}
+              {signal.signal.includes("SELL") && (
+                <button
+                  onClick={async (e) => {
+                    e.stopPropagation();
+                    const amount = signal.kelly_fraction ? Math.max(0.5, signal.kelly_fraction * 100).toFixed(2) : "1";
+                    toast.info(`Placing SELL $${amount} order...`);
+                    try {
+                      const resp = await fetch("/api/trade", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ token_id: signal.market_id, side: "SELL", amount }),
+                      });
+                      const data = await resp.json();
+                      if (data.success) toast.success(`Order placed: SELL $${amount}`);
+                      else toast.error(data.error || data.order?.response || "Order failed");
+                    } catch { toast.error("Order request failed"); }
+                  }}
+                  className="inline-flex items-center gap-1 text-[10px] px-2.5 py-1 rounded-full bg-red-600 hover:bg-red-500 text-white font-medium transition-colors"
+                >
+                  <ShoppingCart className="w-2.5 h-2.5" />
+                  SELL ${signal.kelly_fraction ? Math.max(0.5, signal.kelly_fraction * 100).toFixed(0) : "1"}
+                </button>
+              )}
+              {signal.polymarket_url && (
+                <a
+                  href={signal.polymarket_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-[10px] text-blue-400 hover:text-blue-300 transition-colors"
+                >
+                  <ExternalLink className="w-2.5 h-2.5" />
+                  Polymarket
+                </a>
+              )}
+            </div>
           </div>
         </div>
       </div>
