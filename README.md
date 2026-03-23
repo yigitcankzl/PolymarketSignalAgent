@@ -116,12 +116,15 @@ All data above is from **live API calls** — Synthesis.trade for market prices,
 - Position tracking, PnL, and order history
 - Persistent state across pipeline runs
 
-### Dashboard
-- **Live Auto-Refresh** — 30s polling with countdown timer, green pulse indicator
-- **Animated Mount** — Framer Motion staggered fade-in, number counters tick to value
-- **Expandable AI Reasoning** — Click any signal row for full chain-of-thought + ensemble model breakdown
+### Dashboard (Full Trading Terminal)
+- **Run Pipeline from UI** — Green "Run Pipeline" button triggers full signal generation from the dashboard
+- **Live Step-by-Step Progress** — Real-time pipeline status: fetching markets → news → LLM analysis → signals → arbitrage → complete
+- **One-Click Trading** — BUY/SELL buttons on each signal with Kelly-sized amounts, executes via Synthesis API
+- **Expandable AI Reasoning** — Click any signal for full chain-of-thought + ensemble model breakdown
 - **Cross-Platform Arbitrage Panel** — Price comparison cards with "Trade on Synthesis" buttons
 - **Live Trading Panel** — Wallet balance, positions, orders from Synthesis API
+- **Auto-Refresh** — 30s polling with countdown, toast notifications for new signals
+- **Animated UI** — Framer Motion mount animations, number counters, skeleton loading
 - **Mobile Responsive** — Card layout on small screens
 
 ## Architecture
@@ -146,12 +149,14 @@ polymarket-signal-agent/
 │   └── src/
 │       ├── app/
 │       │   ├── page.tsx           # Main dashboard page
-│       │   └── api/               # 7 API routes (signals, markets, backtest,
-│       │       └── ...            #   arbitrage, synthesis, trading)
-│       └── components/            # 11 UI components
-│           ├── signal-table.tsx   # Expandable signals with sparklines
+│       │   └── api/               # 10 API routes (signals, markets, backtest,
+│       │       └── ...            #   arbitrage, synthesis, trading, run-pipeline,
+│       │                          #   pipeline-status, trade)
+│       └── components/            # 13 UI components
+│           ├── signal-table.tsx   # Signals with sparklines + BUY/SELL buttons
 │           ├── arbitrage-panel.tsx # Cross-platform arb opportunities
 │           ├── trading-panel.tsx  # Live wallet/positions/orders
+│           ├── pipeline-status.tsx # Real-time pipeline execution progress
 │           ├── pnl-chart.tsx      # Cumulative P&L area chart
 │           └── ...
 ├── data/                          # Pipeline output (live JSON)
@@ -212,15 +217,15 @@ cp .env.example .env
 ### Run
 
 ```bash
-# Generate signals + detect arbitrage
+# Launch dashboard (includes "Run Pipeline" button)
+cd dashboard && npm run dev
+# Open http://localhost:3000 → click green "Run Pipeline" button
+
+# Or run from CLI:
 python3 -m engine.main --markets 10
 
 # With automated trading
 python3 -m engine.main --markets 10 --trade
-
-# Launch dashboard
-cd dashboard && npm run dev
-# Open http://localhost:3000
 ```
 
 ### CLI Options

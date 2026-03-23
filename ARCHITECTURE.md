@@ -120,7 +120,20 @@ Step 5: ARBITRAGE SCAN    TRADE EXECUTION    Step 6: EXPORT
 - Five-tier classification with configurable thresholds
 - **Kelly criterion**: `kelly = (p×b−q)/b × 0.25`, capped at 5% of bankroll
 - Score-based ranking: `|edge| × confidence`
+- Carries `left_token_id` / `right_token_id` for direct trading from dashboard
 - Polymarket URL generation via event slug
+
+### Pipeline Status (`main.py` → `data/pipeline_status.json`)
+- Writes step-by-step status at each pipeline stage
+- Dashboard polls `/api/pipeline-status` every 1.5s
+- Shows animated progress bar + step indicators with descriptions
+- 7 steps: start → fetch → news → LLM → signals → arbitrage → export → complete
+
+### Dashboard Trading (`/api/trade`, `/api/run-pipeline`)
+- **Run Pipeline**: `POST /api/run-pipeline` spawns Python pipeline from dashboard
+- **One-Click Trade**: `POST /api/trade` places orders via Synthesis wallet API
+- BUY signals use `left_token_id` (YES shares), SELL signals use `right_token_id` (NO shares)
+- Kelly-sized amounts displayed on buttons
 
 ### Arbitrage Scanner (`arbitrage.py`)
 Three detection modes:
@@ -155,9 +168,13 @@ Google RSS ──→ news ──→ data/news/ (cached)
                                data/trader/latest.json ──→ /api/trading
 Synthesis Wallet ──→ balance ──→ (embedded in trader data)
                                data/backtest/latest.json──→ /api/backtest
+                               data/pipeline_status.json──→ /api/pipeline-status
+
+Dashboard ──→ POST /api/run-pipeline ──→ spawns Python pipeline
+Dashboard ──→ POST /api/trade ──→ Synthesis order API ──→ Polymarket
 ```
 
-Dashboard auto-refreshes every 30 seconds. Toast notifications alert on new signals.
+Dashboard auto-refreshes every 30 seconds. "Run Pipeline" button triggers full execution from the UI. Toast notifications alert on new signals. One-click BUY/SELL buttons place orders directly.
 
 ## Design Decisions
 
