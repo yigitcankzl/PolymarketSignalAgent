@@ -19,6 +19,8 @@ interface Signal {
   key_factors: string[];
   news_count: number;
   kelly_fraction?: number;
+  left_token_id?: string;
+  right_token_id?: string;
   sparkline?: number[];
   polymarket_url?: string;
   ensemble?: {
@@ -110,14 +112,15 @@ function SignalDetail({ signal }: { signal: Signal }) {
                       const resp = await fetch("/api/trade", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ token_id: signal.market_id, side: "BUY", amount }),
+                        body: JSON.stringify({ token_id: signal.left_token_id, side: "BUY", amount }),
                       });
                       const data = await resp.json();
                       if (data.success) toast.success(`Order placed: BUY $${amount}`);
                       else toast.error(data.error || data.order?.response || "Order failed");
                     } catch { toast.error("Order request failed"); }
                   }}
-                  className="inline-flex items-center gap-1 text-[10px] px-2.5 py-1 rounded-full bg-green-600 hover:bg-green-500 text-white font-medium transition-colors"
+                  disabled={!signal.left_token_id}
+                  className="inline-flex items-center gap-1 text-[10px] px-2.5 py-1 rounded-full bg-green-600 hover:bg-green-500 disabled:bg-zinc-700 disabled:text-zinc-500 text-white font-medium transition-colors"
                 >
                   <ShoppingCart className="w-2.5 h-2.5" />
                   BUY ${signal.kelly_fraction ? Math.max(0.5, signal.kelly_fraction * 100).toFixed(0) : "1"}
@@ -133,14 +136,15 @@ function SignalDetail({ signal }: { signal: Signal }) {
                       const resp = await fetch("/api/trade", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ token_id: signal.market_id, side: "SELL", amount }),
+                        body: JSON.stringify({ token_id: signal.right_token_id, side: "BUY", amount }),
                       });
                       const data = await resp.json();
                       if (data.success) toast.success(`Order placed: SELL $${amount}`);
                       else toast.error(data.error || data.order?.response || "Order failed");
                     } catch { toast.error("Order request failed"); }
                   }}
-                  className="inline-flex items-center gap-1 text-[10px] px-2.5 py-1 rounded-full bg-red-600 hover:bg-red-500 text-white font-medium transition-colors"
+                  disabled={!signal.right_token_id}
+                  className="inline-flex items-center gap-1 text-[10px] px-2.5 py-1 rounded-full bg-red-600 hover:bg-red-500 disabled:bg-zinc-700 disabled:text-zinc-500 text-white font-medium transition-colors"
                 >
                   <ShoppingCart className="w-2.5 h-2.5" />
                   SELL ${signal.kelly_fraction ? Math.max(0.5, signal.kelly_fraction * 100).toFixed(0) : "1"}

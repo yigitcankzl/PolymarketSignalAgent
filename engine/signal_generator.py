@@ -65,7 +65,7 @@ def calculate_kelly(edge: float, confidence: float, market_odds: float, fraction
     return round(min(kelly, max_kelly), 4)
 
 
-def create_signal_entry(analysis: dict, news_count: int = 0, slug: str = "") -> dict:
+def create_signal_entry(analysis: dict, news_count: int = 0, slug: str = "", left_token_id: str = "", right_token_id: str = "") -> dict:
     """Create a full signal entry from analysis results."""
     market_odds = analysis["market_odds"]
     llm_probability = analysis["probability"]
@@ -88,6 +88,8 @@ def create_signal_entry(analysis: dict, news_count: int = 0, slug: str = "") -> 
         "signal": signal,
         "score": round(score, 4),
         "kelly_fraction": kelly_size,
+        "left_token_id": left_token_id,
+        "right_token_id": right_token_id,
         "polymarket_url": polymarket_url,
         "reasoning": analysis["reasoning"],
         "key_factors": analysis["key_factors"],
@@ -118,6 +120,7 @@ def generate_all_signals(
     analyses: list[dict],
     news_counts: dict[str, int],
     slugs: dict[str, str] | None = None,
+    token_ids: dict[str, dict] | None = None,
 ) -> list[dict]:
     """Generate signals for all analyzed markets.
 
@@ -125,17 +128,24 @@ def generate_all_signals(
         analyses: List of analysis results from LLMAnalyzer.batch_analyze
         news_counts: Dict mapping market_id -> number of news articles
         slugs: Dict mapping market_id -> polymarket slug
+        token_ids: Dict mapping market_id -> {left_token_id, right_token_id}
 
     Returns:
         Ranked list of signal entries
     """
     slugs = slugs or {}
+    token_ids = token_ids or {}
     signals = []
     for analysis in analyses:
         market_id = analysis["market_id"]
         count = news_counts.get(market_id, 0)
         slug = slugs.get(market_id, "")
-        signal = create_signal_entry(analysis, news_count=count, slug=slug)
+        tokens = token_ids.get(market_id, {})
+        signal = create_signal_entry(
+            analysis, news_count=count, slug=slug,
+            left_token_id=tokens.get("left", ""),
+            right_token_id=tokens.get("right", ""),
+        )
         signals.append(signal)
 
     signals = rank_signals(signals)

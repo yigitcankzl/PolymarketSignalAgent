@@ -66,6 +66,8 @@ def _fetch_markets_synthesis(max_markets: int) -> tuple[list[dict], list[dict]]:
                 "slug": m.get("slug", ""),
                 "event_slug": event_slug,
                 "outcome": m.get("outcome", ""),
+                "left_token_id": m.get("left_token_id", ""),
+                "right_token_id": m.get("right_token_id", ""),
                 "yes_odds": yes_price,
                 "no_odds": no_price,
                 "outcomes": [m.get("left_outcome", "Yes"), m.get("right_outcome", "No")],
@@ -216,7 +218,8 @@ def run_pipeline(
     print("[4/6] Generating signals with Kelly sizing...")
     news_counts = {mid: len(articles) for mid, articles in news_map.items()}
     slugs = {m["id"]: m.get("slug", "") for m in markets}
-    signals = generate_all_signals(analyses, news_counts, slugs=slugs)
+    token_ids = {m["id"]: {"left": m.get("left_token_id", ""), "right": m.get("right_token_id", "")} for m in markets}
+    signals = generate_all_signals(analyses, news_counts, slugs=slugs, token_ids=token_ids)
     print(f"  Generated {len(signals)} signals\n")
 
     # Step 5: Cross-platform arbitrage scan
