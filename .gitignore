@@ -45,3 +45,4 @@ Thumbs.db
 *.png
 !docs/*.png
 !public/*.png
+!assets/*.png
